@@ -6,6 +6,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -32,6 +33,7 @@ func GetAllLogs(c *gin.Context) {
 	} else {
 		model.FormatRootLogs(logs)
 	}
+	normalizeUsagePromptAuditLogs(logs)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -54,6 +56,7 @@ func GetUserLogs(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	normalizeUsagePromptAuditLogs(logs)
 	pageInfo.SetTotal(int(total))
 	pageInfo.SetItems(logs)
 	common.ApiSuccess(c, pageInfo)
@@ -93,11 +96,18 @@ func GetLogByKey(c *gin.Context) {
 		})
 		return
 	}
+	normalizeUsagePromptAuditLogs(logs)
 	c.JSON(200, gin.H{
 		"success": true,
 		"message": "",
 		"data":    logs,
 	})
+}
+
+func normalizeUsagePromptAuditLogs(logs []*model.Log) {
+	for _, log := range logs {
+		log.Other = service.NormalizeUsagePromptAuditOther(log.Other)
+	}
 }
 
 func GetLogsStat(c *gin.Context) {

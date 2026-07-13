@@ -123,6 +123,17 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
 	}
+	if bodyStorage, bodyErr := common.GetBodyStorage(c); bodyErr == nil {
+		body, truncated, captureErr := service.CaptureUsagePromptAuditBodyFromStorage(bodyStorage)
+		if captureErr != nil {
+			logger.LogWarn(c, "failed to capture usage prompt audit client request body: "+captureErr.Error())
+		} else {
+			relayInfo.UsageLogRawClientRequestBody = body
+			relayInfo.UsageLogRawClientRequestBodyTruncated = truncated
+		}
+	} else {
+		logger.LogWarn(c, "failed to get request body storage for usage prompt audit: "+bodyErr.Error())
+	}
 
 	defer func() {
 		recovered := recover()
