@@ -209,15 +209,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 		if err != nil {
 			return nil, 0, err
 		}
-		keyCol := commonKeyCol
-		if keyCol == "" {
-			if common.UsingPostgreSQL {
-				keyCol = `"key"`
-			} else {
-				keyCol = "`key`"
-			}
-		}
-		baseQuery = baseQuery.Where(keyCol+" LIKE ? ESCAPE '!'", tokenPattern)
+		baseQuery = baseQuery.Where(commonKeyCol+" LIKE ? ESCAPE '!'", tokenPattern)
 	}
 
 	// 先查匹配总数（用于分页，受 maxTokens 上限保护，避免全表 COUNT）

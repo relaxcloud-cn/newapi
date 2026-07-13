@@ -172,6 +172,14 @@ type RelayInfo struct {
 	// It is surfaced onto the consume/task log's admin_info for auditing.
 	QuotaClamp *common.QuotaClamp
 
+	// Usage-log prompt audit captures bounded raw request/response snapshots.
+	UsageLogRawClientRequestBody            []byte
+	UsageLogRawClientRequestBodyTruncated   bool
+	UsageLogRawUpstreamRequestBody          []byte
+	UsageLogRawUpstreamRequestBodyTruncated bool
+	UsageLogRawResponseBody                 []byte
+	UsageLogRawResponseBodyTruncated        bool
+
 	// TieredBillingSnapshot captures tiered billing rules at pre-consume time.
 	// Auto-group retries refresh its group-dependent fields before each attempt
 	// and again before settlement. Non-nil only when billing mode is "tiered_expr".
