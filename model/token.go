@@ -129,6 +129,17 @@ func validateLikePattern(input string) error {
 	return nil
 }
 
+func sanitizeContainsLikePattern(input string) (string, error) {
+	pattern, err := sanitizeLikePattern(input)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(pattern, "%") {
+		return pattern, nil
+	}
+	return "%" + pattern + "%", nil
+}
+
 const searchHardLimit = 100
 
 func SearchUserTokens(userId int, keyword string, token string, offset int, limit int) (tokens []*Token, total int64, err error) {
@@ -146,7 +157,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 
 	// 超量用户（令牌数超过上限）只允许精确搜索，禁止模糊搜索
 	maxTokens := operation_setting.GetMaxUserTokens()
-	hasFuzzy := strings.Contains(keyword, "%") || strings.Contains(token, "%")
+	hasFuzzy := keyword != "" || token != ""
 	if hasFuzzy {
 		count, err := CountUserTokens(userId)
 		if err != nil {
@@ -154,7 +165,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 			return nil, 0, errors.New("获取令牌数量失败")
 		}
 		if int(count) > maxTokens {
-			return nil, 0, errors.New("令牌数量超过上限，仅允许精确搜索，请勿使用 % 通配符")
+			return nil, 0, errors.New("令牌数量超过上限，仅允许精确搜索")
 		}
 	}
 
@@ -162,18 +173,26 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
 	if keyword != "" {
-		keywordPattern, err := sanitizeLikePattern(keyword)
+		keywordPattern, err := sanitizeContainsLikePattern(keyword)
 		if err != nil {
 			return nil, 0, err
 		}
 		baseQuery = baseQuery.Where("name LIKE ? ESCAPE '!'", keywordPattern)
 	}
 	if token != "" {
-		tokenPattern, err := sanitizeLikePattern(token)
+		tokenPattern, err := sanitizeContainsLikePattern(token)
 		if err != nil {
 			return nil, 0, err
 		}
-		baseQuery = baseQuery.Where(commonKeyCol+" LIKE ? ESCAPE '!'", tokenPattern)
+		keyCol := commonKeyCol
+		if keyCol == "" {
+			if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+				keyCol = `"key"`
+			} else {
+				keyCol = "`key`"
+			}
+		}
+		baseQuery = baseQuery.Where(keyCol+" LIKE ? ESCAPE '!'", tokenPattern)
 	}
 
 	// 先查匹配总数（用于分页，受 maxTokens 上限保护，避免全表 COUNT）

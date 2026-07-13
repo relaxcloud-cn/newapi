@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -442,6 +443,40 @@ func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("search response leaked raw token key: %s", recorder.Body.String())
 	}
+}
+
+func TestSearchTokensKeywordMatchesNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	seedToken(t, db, 1, "north-beijing-token", "abcd1234efgh5678")
+	seedToken(t, db, 1, "shanghai-token", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "north-beijing-token", page.Items[0].Name)
+}
+
+func TestSearchTokensTokenMatchesKeySubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	seedToken(t, db, 1, "matching-key-token", "abcd1234efgh5678")
+	seedToken(t, db, 1, "other-key-token", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?token=efgh&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "matching-key-token", page.Items[0].Name)
 }
 
 func TestGetTokenMasksKeyInResponse(t *testing.T) {
