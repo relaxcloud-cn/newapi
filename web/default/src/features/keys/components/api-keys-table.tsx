@@ -20,7 +20,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import type { Table as TanstackTable } from '@tanstack/react-table'
 import { Database } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -42,6 +42,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { getUserGroups } from '@/lib/api'
 import { formatQuota } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
@@ -215,6 +216,7 @@ export function ApiKeysTable() {
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
+      { columnId: 'group', searchKey: 'group', type: 'array' },
       { columnId: '_tokenSearch', searchKey: 'token', type: 'string' },
     ],
   })
@@ -228,7 +230,29 @@ export function ApiKeysTable() {
     columnId: '_tokenSearch',
     onColumnFiltersChange,
   })
+  const groupFilter =
+    (columnFilters.find((filter) => filter.id === 'group')
+      ?.value as string[]) || []
+  const selectedGroup =
+    groupFilter.length > 0 && !groupFilter.includes('all')
+      ? groupFilter[0]
+      : undefined
   const shouldSearch = Boolean(globalFilter?.trim() || tokenFilter.trim())
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['user-groups'],
+    queryFn: getUserGroups,
+  })
+  const groupFilterOptions = useMemo(
+    () => [
+      { label: t('All Groups'), value: 'all' },
+      ...Object.keys(groupsData?.data || {}).map((group) => ({
+        label: group,
+        value: group,
+      })),
+    ],
+    [groupsData, t]
+  )
 
   // Fetch data with React Query
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
@@ -239,6 +263,7 @@ export function ApiKeysTable() {
       pagination.pageSize,
       globalFilter,
       tokenFilter,
+      selectedGroup,
       refreshTrigger,
     ],
     queryFn: async () => {
@@ -246,10 +271,12 @@ export function ApiKeysTable() {
         ? await searchApiKeys({
             keyword: globalFilter,
             token: tokenFilter,
+            group: selectedGroup,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
         : await getApiKeys({
+            group: selectedGroup,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
@@ -321,6 +348,12 @@ export function ApiKeysTable() {
             columnId: 'status',
             title: t('Status'),
             options: API_KEY_STATUS_OPTIONS,
+            singleSelect: true,
+          },
+          {
+            columnId: 'group',
+            title: t('Group'),
+            options: groupFilterOptions,
             singleSelect: true,
           },
         ],
