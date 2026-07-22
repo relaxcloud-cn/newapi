@@ -35,9 +35,9 @@ import type {
 export async function getApiKeys(
   params: GetApiKeysParams = {}
 ): Promise<GetApiKeysResponse> {
-  const { group = '', p = 1, size = 10 } = params
+  const { groups = [], p = 1, size = 10 } = params
   const queryParams = new URLSearchParams()
-  if (group) queryParams.set('group', group)
+  groups.forEach((group) => queryParams.append('group', group))
   queryParams.set('p', String(p))
   queryParams.set('size', String(size))
   const res = await api.get(`/api/token/?${queryParams.toString()}`)
@@ -48,11 +48,11 @@ export async function getApiKeys(
 export async function searchApiKeys(
   params: SearchApiKeysParams
 ): Promise<GetApiKeysResponse> {
-  const { keyword = '', token = '', group = '', p, size } = params
+  const { keyword = '', token = '', groups = [], p, size } = params
   const queryParams = new URLSearchParams()
   if (keyword) queryParams.set('keyword', keyword)
   if (token) queryParams.set('token', token)
-  if (group) queryParams.set('group', group)
+  groups.forEach((group) => queryParams.append('group', group))
   if (p != null) queryParams.set('p', String(p))
   if (size != null) queryParams.set('size', String(size))
   const res = await api.get(`/api/token/search?${queryParams.toString()}`)

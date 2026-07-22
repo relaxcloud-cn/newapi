@@ -33,9 +33,9 @@ func buildMaskedTokenResponses(tokens []*model.Token) []*model.Token {
 
 func GetAllTokens(c *gin.Context) {
 	userId := c.GetInt("id")
-	group := c.Query("group")
+	groups := c.QueryArray("group")
 	pageInfo := common.GetPageQuery(c)
-	tokens, total, err := model.GetAllUserTokens(userId, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	tokens, total, err := model.GetAllUserTokens(userId, groups, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -49,11 +49,11 @@ func SearchTokens(c *gin.Context) {
 	userId := c.GetInt("id")
 	keyword := c.Query("keyword")
 	token := c.Query("token")
-	group := c.Query("group")
+	groups := c.QueryArray("group")
 
 	pageInfo := common.GetPageQuery(c)
 
-	tokens, total, err := model.SearchUserTokens(userId, keyword, token, group, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
+	tokens, total, err := model.SearchUserTokens(userId, keyword, token, groups, pageInfo.GetStartIdx(), pageInfo.GetPageSize())
 	if err != nil {
 		common.ApiError(c, err)
 		return

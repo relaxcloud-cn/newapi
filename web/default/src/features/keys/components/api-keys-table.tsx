@@ -216,7 +216,13 @@ export function ApiKeysTable() {
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
-      { columnId: 'group', searchKey: 'group', type: 'array' },
+      {
+        columnId: 'group',
+        searchKey: 'group',
+        type: 'array',
+        deserialize: (value) =>
+          Array.isArray(value) ? value.filter((group) => group !== 'all') : [],
+      },
       { columnId: '_tokenSearch', searchKey: 'token', type: 'string' },
     ],
   })
@@ -230,13 +236,14 @@ export function ApiKeysTable() {
     columnId: '_tokenSearch',
     onColumnFiltersChange,
   })
-  const groupFilter =
-    (columnFilters.find((filter) => filter.id === 'group')
-      ?.value as string[]) || []
-  const selectedGroup =
-    groupFilter.length > 0 && !groupFilter.includes('all')
-      ? groupFilter[0]
-      : undefined
+  const selectedGroups = useMemo(
+    () =>
+      (
+        (columnFilters.find((filter) => filter.id === 'group')
+          ?.value as string[]) || []
+      ).filter((group) => group !== 'all'),
+    [columnFilters]
+  )
   const shouldSearch = Boolean(globalFilter?.trim() || tokenFilter.trim())
 
   const { data: groupsData } = useQuery({
@@ -263,7 +270,7 @@ export function ApiKeysTable() {
       pagination.pageSize,
       globalFilter,
       tokenFilter,
-      selectedGroup,
+      selectedGroups,
       refreshTrigger,
     ],
     queryFn: async () => {
@@ -271,12 +278,12 @@ export function ApiKeysTable() {
         ? await searchApiKeys({
             keyword: globalFilter,
             token: tokenFilter,
-            group: selectedGroup,
+            groups: selectedGroups,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
         : await getApiKeys({
-            group: selectedGroup,
+            groups: selectedGroups,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
@@ -354,7 +361,8 @@ export function ApiKeysTable() {
             columnId: 'group',
             title: t('Group'),
             options: groupFilterOptions,
-            singleSelect: true,
+            allOptionValue: 'all',
+            showCounts: false,
           },
         ],
       }}

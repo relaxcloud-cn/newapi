@@ -239,6 +239,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
           </TruncatedCell>
         )
       },
+      filterFn: (row, id, value) => value.includes(String(row.getValue(id))),
       size: 160,
       meta: { mobileHidden: true },
     },

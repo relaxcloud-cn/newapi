@@ -128,10 +128,10 @@ func (token *Token) NormalizeMacLimits() error {
 	return nil
 }
 
-func GetAllUserTokens(userId int, group string, startIdx int, num int) (tokens []*Token, total int64, err error) {
+func GetAllUserTokens(userId int, groups []string, startIdx int, num int) (tokens []*Token, total int64, err error) {
 	query := DB.Model(&Token{}).Where("user_id = ?", userId)
-	if group != "" {
-		query = query.Where(&Token{Group: group})
+	if len(groups) > 0 {
+		query = query.Where(map[string]interface{}{"group": groups})
 	}
 	if err = query.Count(&total).Error; err != nil {
 		return nil, 0, err
@@ -197,7 +197,7 @@ func sanitizeContainsLikePattern(input string) (string, error) {
 
 const searchHardLimit = 100
 
-func SearchUserTokens(userId int, keyword string, token string, group string, offset int, limit int) (tokens []*Token, total int64, err error) {
+func SearchUserTokens(userId int, keyword string, token string, groups []string, offset int, limit int) (tokens []*Token, total int64, err error) {
 	// model 层强制截断
 	if limit <= 0 || limit > searchHardLimit {
 		limit = searchHardLimit
@@ -225,8 +225,8 @@ func SearchUserTokens(userId int, keyword string, token string, group string, of
 	}
 
 	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
-	if group != "" {
-		baseQuery = baseQuery.Where(&Token{Group: group})
+	if len(groups) > 0 {
+		baseQuery = baseQuery.Where(map[string]interface{}{"group": groups})
 	}
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
