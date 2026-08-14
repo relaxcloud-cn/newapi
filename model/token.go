@@ -25,6 +25,8 @@ type Token struct {
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
+	MacCheckEnabled    bool           `json:"mac_check_enabled"`
+	AllowMacs          *string        `json:"allow_macs" gorm:"type:text;default:''"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
@@ -101,6 +103,49 @@ func (token *Token) GetIpLimits() []string {
 		}
 	}
 	return ipLimits
+}
+
+func (token *Token) GetMacLimits() []string {
+	macLimits := make([]string, 0)
+	if token.AllowMacs == nil {
+		return macLimits
+	}
+	for mac := range strings.SplitSeq(*token.AllowMacs, "\n") {
+		mac = strings.TrimSpace(mac)
+		if mac != "" {
+			macLimits = append(macLimits, mac)
+		}
+	}
+	return macLimits
+}
+
+func (token *Token) NormalizeMacLimits() error {
+	macLimits := token.GetMacLimits()
+	if len(macLimits) == 0 {
+		empty := ""
+		token.AllowMacs = &empty
+		if token.MacCheckEnabled {
+			return errors.New("MAC address whitelist is required when MAC validation is enabled")
+		}
+		return nil
+	}
+
+	normalizedMacs := make([]string, 0, len(macLimits))
+	seen := make(map[string]struct{}, len(macLimits))
+	for _, mac := range macLimits {
+		normalizedMac, err := common.NormalizeMacAddress(mac)
+		if err != nil {
+			return err
+		}
+		if _, exists := seen[normalizedMac]; exists {
+			continue
+		}
+		seen[normalizedMac] = struct{}{}
+		normalizedMacs = append(normalizedMacs, normalizedMac)
+	}
+	normalized := strings.Join(normalizedMacs, "\n")
+	token.AllowMacs = &normalized
+	return nil
 }
 
 func GetAllUserTokens(userId int, groups []string, startIdx int, num int) (tokens []*Token, total int64, err error) {
@@ -332,7 +377,7 @@ func (token *Token) Update() (err error) {
 		common.SysLog("failed to invalidate token cache before update: " + cacheErr.Error())
 	}
 	return DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry", "auto_groups").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "mac_check_enabled", "allow_macs", "group", "cross_group_retry", "auto_groups").Updates(token).Error
 }
 
 func (token *Token) SelectUpdate() (err error) {

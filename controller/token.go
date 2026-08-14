@@ -290,6 +290,10 @@ func AddToken(c *gin.Context) {
 	}
 	params := tokenAuditParams(c)
 	params["name"] = token.Name
+	if err := token.NormalizeMacLimits(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -342,6 +346,8 @@ func AddToken(c *gin.Context) {
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
+		MacCheckEnabled:    token.MacCheckEnabled,
+		AllowMacs:          token.AllowMacs,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 		AutoGroups:         token.AutoGroups,
@@ -431,6 +437,10 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.Status = token.Status
 	} else {
 		// If you add more fields, please also update token.Update()
+		if err := token.NormalizeMacLimits(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
 		cleanToken.RemainQuota = token.RemainQuota
@@ -438,6 +448,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
+		cleanToken.MacCheckEnabled = token.MacCheckEnabled
+		cleanToken.AllowMacs = token.AllowMacs
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 		if token.Group != "auto" {

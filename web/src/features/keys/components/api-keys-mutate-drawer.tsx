@@ -336,7 +336,8 @@ export function ApiKeysMutateDrawer({
     }
   }
 
-  const onInvalid: SubmitErrorHandler<ApiKeyFormValues> = () => {
+  const onInvalid: SubmitErrorHandler<ApiKeyFormValues> = (errors) => {
+    if (errors.allow_macs) setAdvancedOpen(true)
     toast.error(t('Please fix the highlighted fields before saving'))
   }
 
@@ -743,6 +744,51 @@ export function ApiKeysMutateDrawer({
                           <FormDescription>
                             {t(
                               'Do not over-trust this feature. IP may be spoofed. Please use with nginx, CDN and other gateways.'
+                            )}
+                          </FormDescription>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='mac_check_enabled'
+                      render={({ field }) => (
+                        <FormItem className={sideDrawerSwitchItemClassName()}>
+                          <div className='flex flex-col gap-0.5'>
+                            <FormLabel>{t('MAC Address Validation')}</FormLabel>
+                            <FormDescription className='text-xs'>
+                              {t(
+                                "Require X-Client-Mac to match this API key's whitelist"
+                              )}
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={form.control}
+                      name='allow_macs'
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>{t('MAC Address Whitelist')}</FormLabel>
+                          <FormControl>
+                            <Textarea
+                              {...field}
+                              className='min-h-20 resize-none font-mono'
+                              placeholder={t('One MAC address per line')}
+                              rows={3}
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            {t(
+                              'Clients must send X-Client-Mac. This header can be forged and does not verify the physical device.'
                             )}
                           </FormDescription>
                           <FormMessage />
