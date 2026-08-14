@@ -5178,6 +5178,14 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "MAC Address Validation": "Xác thực địa chỉ MAC",
+    "MAC Address Whitelist": "Danh sách cho phép địa chỉ MAC",
+    "MAC validation requires at least one allowed MAC address": "Xác thực MAC yêu cầu ít nhất một địa chỉ MAC được phép",
+    "One MAC address per line": "Mỗi dòng một địa chỉ MAC",
+    "Enter a valid MAC address on each line": "Nhập một địa chỉ MAC hợp lệ trên mỗi dòng",
+    "Require X-Client-Mac to match this API key's whitelist": "Yêu cầu X-Client-Mac khớp với danh sách cho phép của khóa API này",
+    "MAC Restriction": "Giới hạn MAC",
+    "{{count}} MAC(s)": "{{count}} địa chỉ MAC"
   }
 }

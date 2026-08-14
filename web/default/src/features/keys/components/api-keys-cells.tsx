@@ -220,3 +220,45 @@ export function IpRestrictionsCell({ apiKey }: { apiKey: ApiKey }) {
     </Tooltip>
   )
 }
+
+export function MacRestrictionsCell({ apiKey }: { apiKey: ApiKey }) {
+  const { t } = useTranslation()
+  const allowMacs = apiKey.allow_macs?.trim()
+
+  if (!apiKey.mac_check_enabled || !allowMacs) {
+    return (
+      <StatusBadge
+        label={t('No restriction')}
+        variant='neutral'
+        copyable={false}
+        className='-ml-1.5'
+      />
+    )
+  }
+
+  const macs = allowMacs
+    .split('\n')
+    .map((mac) => mac.trim())
+    .filter(Boolean)
+
+  return (
+    <Tooltip>
+      <TooltipTrigger render={<BadgeCell />}>
+        <StatusBadge
+          label={t('{{count}} MAC(s)', { count: macs.length })}
+          variant='neutral'
+          copyable={false}
+        />
+      </TooltipTrigger>
+      <TooltipContent side='top' className='max-w-xs'>
+        <div className='max-h-[200px] space-y-0.5 overflow-y-auto text-xs'>
+          {macs.map((mac) => (
+            <div key={mac} className='font-mono'>
+              {mac}
+            </div>
+          ))}
+        </div>
+      </TooltipContent>
+    </Tooltip>
+  )
+}

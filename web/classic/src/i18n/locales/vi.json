@@ -4218,6 +4218,10 @@
     "默认折叠侧边栏": "Mặc định thu gọn thanh bên",
     "默认测试模型": "Mô hình kiểm tra mặc định",
     "默认用户消息": "Xin chào",
-    "默认补全倍率": "Tỷ lệ hoàn thành mặc định"
+    "默认补全倍率": "Tỷ lệ hoàn thành mặc định",
+    "MAC Address Validation": "Xác thực địa chỉ MAC",
+    "MAC Address Whitelist": "Danh sách cho phép địa chỉ MAC",
+    "One MAC address per line": "Mỗi dòng một địa chỉ MAC",
+    "Require X-Client-Mac to match this API key's whitelist": "Yêu cầu X-Client-Mac khớp với danh sách cho phép của khóa API này"
   }
 }
