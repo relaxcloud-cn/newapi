@@ -26,7 +26,7 @@ type Token struct {
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
 	MacCheckEnabled    bool           `json:"mac_check_enabled"`
-	AllowMacs          *string        `json:"allow_macs" gorm:"type:text;default:''"`
+	AllowMacs          *string        `json:"allow_macs" gorm:"type:text"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
