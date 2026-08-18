@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -30,6 +31,7 @@ type tokenAPIResponse struct {
 
 type tokenPageResponse struct {
 	Items []tokenResponseItem `json:"items"`
+	Total int                 `json:"total"`
 }
 
 type tokenResponseItem struct {
@@ -423,6 +425,55 @@ func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestGetAllTokensFiltersByGroup(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "premium-token", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	seedToken(t, db, 1, "default-token", "mnop1234qrst5678")
+	otherUser := seedToken(t, db, 2, "other-user-premium", "uvwx1234yzab5678")
+	require.NoError(t, db.Model(otherUser).Update("group", "premium").Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?group=premium&p=1&size=10", nil, 1)
+	GetAllTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "premium-token", page.Items[0].Name)
+}
+
+func TestGetAllTokensFiltersByMultipleGroups(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "premium-token", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	standard := seedToken(t, db, 1, "standard-token", "mnop1234qrst5678")
+	require.NoError(t, db.Model(standard).Update("group", "standard").Error)
+	defaultToken := seedToken(t, db, 1, "default-token", "ijkl1234mnop5678")
+	otherUser := seedToken(t, db, 2, "other-user-premium", "uvwx1234yzab5678")
+	require.NoError(t, db.Model(otherUser).Update("group", "premium").Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?group=premium&group=standard&p=1&size=10", nil, 1)
+	GetAllTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	assert.ElementsMatch(t, []string{"premium-token", "standard-token"}, []string{
+		page.Items[0].Name,
+		page.Items[1].Name,
+	})
+	assert.NotEqual(t, defaultToken.Name, page.Items[0].Name)
+	assert.NotEqual(t, defaultToken.Name, page.Items[1].Name)
+}
+
 func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "searchable-token", "ijkl1234mnop5678")
@@ -465,6 +516,49 @@ func TestSearchTokensKeywordMatchesNameSubstring(t *testing.T) {
 	require.NoError(t, common.Unmarshal(response.Data, &page))
 	require.Len(t, page.Items, 1)
 	require.Equal(t, "north-beijing-token", page.Items[0].Name)
+}
+
+func TestSearchTokensCombinesGroupAndNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "north-beijing-premium", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	seedToken(t, db, 1, "north-beijing-default", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&group=premium&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "north-beijing-premium", page.Items[0].Name)
+}
+
+func TestSearchTokensCombinesMultipleGroupsAndNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "north-beijing-premium", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	standard := seedToken(t, db, 1, "north-beijing-standard", "mnop1234qrst5678")
+	require.NoError(t, db.Model(standard).Update("group", "standard").Error)
+	seedToken(t, db, 1, "north-beijing-default", "ijkl1234mnop5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&group=premium&group=standard&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	assert.ElementsMatch(t, []string{"north-beijing-premium", "north-beijing-standard"}, []string{
+		page.Items[0].Name,
+		page.Items[1].Name,
+	})
 }
 
 func TestSearchTokensTokenMatchesKeySubstring(t *testing.T) {
