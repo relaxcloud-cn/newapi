@@ -311,6 +311,11 @@ func runTokenMigrationCompatibilityTest(t *testing.T, db *gorm.DB, dialect strin
 	}
 
 	migrateTokenControllerTestDB(t, db)
+	for _, column := range []string{"mac_check_enabled", "allow_macs"} {
+		if !db.Migrator().HasColumn(&model.Token{}, column) {
+			t.Fatalf("expected migrated token schema to contain %s", column)
+		}
+	}
 
 	if got := getTokenKeyColumnType(t, db, dialect); got != "varchar(128)" {
 		t.Fatalf("expected migrated key column type varchar(128), got %q", got)
@@ -504,6 +509,33 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestAddTokenPersistsMacValidation(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	body := map[string]any{
+		"name":                 "mac-restricted-token",
+		"expired_time":         -1,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"mac_check_enabled":    true,
+		"allow_macs":           "94-B6-09-F6-4F-41",
+		"group":                "default",
+		"cross_group_retry":    false,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var created model.Token
+	require.NoError(t, db.First(&created, "user_id = ? AND name = ?", 1, "mac-restricted-token").Error)
+	require.True(t, created.MacCheckEnabled)
+	require.NotNil(t, created.AllowMacs)
+	require.Equal(t, "94:b6:09:f6:4f:41", *created.AllowMacs)
+}
+
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "editable-token", "yzab1234cdef5678")
@@ -516,6 +548,8 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 		"unlimited_quota":      true,
 		"model_limits_enabled": false,
 		"model_limits":         "",
+		"mac_check_enabled":    true,
+		"allow_macs":           "94-B6-09-F6-4F-41\n00:11:22:33:44:55",
 		"group":                "default",
 		"cross_group_retry":    false,
 	}
@@ -538,6 +572,12 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
 	}
+
+	var updated model.Token
+	require.NoError(t, db.First(&updated, token.Id).Error)
+	require.True(t, updated.MacCheckEnabled)
+	require.NotNil(t, updated.AllowMacs)
+	require.Equal(t, "94:b6:09:f6:4f:41\n00:11:22:33:44:55", *updated.AllowMacs)
 }
 
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {

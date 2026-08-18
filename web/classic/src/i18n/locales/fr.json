@@ -3684,6 +3684,10 @@
     "默认折叠侧边栏": "Réduire la barre latérale par défaut",
     "默认测试模型": "Modèle de test par défaut",
     "默认用户消息": "Bonjour",
-    "默认补全倍率": "Taux de complétion par défaut"
+    "默认补全倍率": "Taux de complétion par défaut",
+    "MAC Address Validation": "Validation de l'adresse MAC",
+    "MAC Address Whitelist": "Liste blanche d'adresses MAC",
+    "One MAC address per line": "Une adresse MAC par ligne",
+    "Require X-Client-Mac to match this API key's whitelist": "Exiger que X-Client-Mac corresponde à la liste blanche de cette clé API"
   }
 }

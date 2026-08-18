@@ -79,6 +79,8 @@ const EditTokenModal = (props) => {
     model_limits_enabled: false,
     model_limits: [],
     allow_ips: '',
+    mac_check_enabled: false,
+    allow_macs: '',
     group: '',
     cross_group_retry: false,
     tokenCount: 1,
@@ -552,7 +554,10 @@ const EditTokenModal = (props) => {
                         ? `▾ ${t('收起原生额度输入')}`
                         : `▸ ${t('使用原生额度输入')}`}
                     </div>
-                    <div style={{ display: showQuotaInput ? 'block' : 'none' }} className='mt-2'>
+                    <div
+                      style={{ display: showQuotaInput ? 'block' : 'none' }}
+                      className='mt-2'
+                    >
                       <Form.InputNumber
                         field='remain_quota'
                         label={t('额度')}
@@ -640,6 +645,28 @@ const EditTokenModal = (props) => {
                       style={{ width: '100%' }}
                     />
                   </Col>
+                  <Col span={24}>
+                    <Form.Switch
+                      field='mac_check_enabled'
+                      label={t('MAC Address Validation')}
+                      extraText={t(
+                        "Require X-Client-Mac to match this API key's whitelist",
+                      )}
+                    />
+                  </Col>
+                  {values.mac_check_enabled && (
+                    <Col span={24}>
+                      <Form.TextArea
+                        field='allow_macs'
+                        label={t('MAC Address Whitelist')}
+                        placeholder={t('One MAC address per line')}
+                        autosize
+                        rows={1}
+                        showClear
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  )}
                 </Row>
               </Card>
             </div>

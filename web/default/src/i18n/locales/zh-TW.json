@@ -5178,6 +5178,14 @@
     "Zero retention": "零數據保留",
     "Zhipu": "智譜",
     "Zhipu V4": "智譜 V4",
-    "Zoom": "縮放"
+    "Zoom": "縮放",
+    "MAC Address Validation": "MAC 位址驗證",
+    "MAC Address Whitelist": "MAC 位址白名單",
+    "MAC validation requires at least one allowed MAC address": "啟用 MAC 驗證時至少需要填寫一個允許的 MAC 位址",
+    "One MAC address per line": "每行填寫一個 MAC 位址",
+    "Enter a valid MAC address on each line": "請確保每行都是有效的 MAC 位址",
+    "Require X-Client-Mac to match this API key's whitelist": "要求 X-Client-Mac 與此 API 金鑰的白名單相符",
+    "MAC Restriction": "MAC 限制",
+    "{{count}} MAC(s)": "{{count}} 個 MAC"
   }
 }

@@ -22,7 +22,7 @@ import { z } from 'zod'
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type ApiKeyFormData, type ApiKey } from '../types'
+import type { ApiKey, ApiKeyFormData } from '../types'
 
 // ============================================================================
 // Form Schema
@@ -37,23 +37,47 @@ export function getApiKeyFormSchema(t: TFunction) {
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
       allow_ips: z.string().optional(),
+      mac_check_enabled: z.boolean(),
+      allow_macs: z.string().optional(),
       group: z.string().optional(),
       cross_group_retry: z.boolean().optional(),
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
-      if (data.unlimited_quota) {
-        return
-      }
-
       if (
-        data.remain_quota_dollars === undefined ||
-        data.remain_quota_dollars < 0
+        !data.unlimited_quota &&
+        (data.remain_quota_dollars === undefined ||
+          data.remain_quota_dollars < 0)
       ) {
         ctx.addIssue({
           code: 'custom',
           path: ['remain_quota_dollars'],
           message: t('Quota must be zero or greater'),
+        })
+      }
+
+      const macAddresses = (data.allow_macs || '')
+        .split('\n')
+        .map((mac) => mac.trim())
+        .filter(Boolean)
+      if (data.mac_check_enabled && macAddresses.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['allow_macs'],
+          message: t(
+            'MAC validation requires at least one allowed MAC address'
+          ),
+        })
+      }
+
+      const validMacPattern =
+        /^([0-9a-f]{2})([:-])(?:[0-9a-f]{2}\2){4}[0-9a-f]{2}$/i
+      const invalidMac = macAddresses.find((mac) => !validMacPattern.test(mac))
+      if (invalidMac) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['allow_macs'],
+          message: t('Enter a valid MAC address on each line'),
         })
       }
     })
@@ -72,6 +96,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   unlimited_quota: true,
   model_limits: [],
   allow_ips: '',
+  mac_check_enabled: false,
+  allow_macs: '',
   group: DEFAULT_GROUP,
   cross_group_retry: true,
   tokenCount: 1,
@@ -109,6 +135,8 @@ export function transformFormDataToPayload(
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
+    mac_check_enabled: data.mac_check_enabled,
+    allow_macs: data.allow_macs || '',
     group: data.group || '',
     cross_group_retry: data.group === 'auto' ? !!data.cross_group_retry : false,
   }
@@ -134,6 +162,8 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
+    mac_check_enabled: apiKey.mac_check_enabled || false,
+    allow_macs: apiKey.allow_macs || '',
     group: apiKey.group || DEFAULT_GROUP,
     cross_group_retry: !!apiKey.cross_group_retry,
     tokenCount: 1,
