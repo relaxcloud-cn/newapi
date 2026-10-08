@@ -3653,6 +3653,10 @@
     "默认折叠侧边栏": "サイドバーをデフォルトで折りたたむ",
     "默认测试模型": "デフォルトテストモデル",
     "默认用户消息": "こんにちは",
-    "默认补全倍率": "デフォルト補完倍率"
+    "默认补全倍率": "デフォルト補完倍率",
+    "MAC Address Validation": "MACアドレス検証",
+    "MAC Address Whitelist": "MACアドレス許可リスト",
+    "One MAC address per line": "1行に1つのMACアドレス",
+    "Require X-Client-Mac to match this API key's whitelist": "X-Client-Mac がこの API キーの許可リストと一致することを要求します"
   }
 }

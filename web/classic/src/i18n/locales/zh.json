@@ -2630,6 +2630,10 @@
     "并确认自行承担部署": "并确认自行承担部署",
     "运营和收费行为产生的法律责任": "运营和收费行为产生的法律责任",
     "，": "，",
-    "、": "、"
+    "、": "、",
+    "MAC Address Validation": "MAC 地址校验",
+    "MAC Address Whitelist": "MAC 地址白名单",
+    "One MAC address per line": "每行填写一个 MAC 地址",
+    "Require X-Client-Mac to match this API key's whitelist": "要求 X-Client-Mac 与此 API 密钥的白名单匹配"
   }
 }

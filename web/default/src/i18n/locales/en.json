@@ -5178,6 +5178,14 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "MAC Address Validation": "MAC Address Validation",
+    "MAC Address Whitelist": "MAC Address Whitelist",
+    "MAC validation requires at least one allowed MAC address": "MAC validation requires at least one allowed MAC address",
+    "One MAC address per line": "One MAC address per line",
+    "Enter a valid MAC address on each line": "Enter a valid MAC address on each line",
+    "Require X-Client-Mac to match this API key's whitelist": "Require X-Client-Mac to match this API key's whitelist",
+    "MAC Restriction": "MAC Restriction",
+    "{{count}} MAC(s)": "{{count}} MAC(s)"
   }
 }

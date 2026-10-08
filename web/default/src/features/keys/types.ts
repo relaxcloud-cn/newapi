@@ -45,6 +45,8 @@ export const apiKeySchema = z.object({
   model_limits_enabled: z.boolean(),
   model_limits: z.string().nullish().default(''),
   allow_ips: z.string().nullish().default(''),
+  mac_check_enabled: z.boolean().optional().default(false),
+  allow_macs: z.string().nullish().default(''),
 })
 
 export type ApiKey = z.infer<typeof apiKeySchema>
@@ -60,6 +62,7 @@ export interface ApiResponse<T = unknown> {
 }
 
 export interface GetApiKeysParams {
+  groups?: string[]
   p?: number
   size?: number
 }
@@ -78,6 +81,7 @@ export interface GetApiKeysResponse {
 export interface SearchApiKeysParams {
   keyword?: string
   token?: string
+  groups?: string[]
   p?: number
   size?: number
 }
@@ -90,6 +94,8 @@ export interface ApiKeyFormData {
   model_limits_enabled: boolean
   model_limits: string
   allow_ips: string
+  mac_check_enabled: boolean
+  allow_macs: string
   group: string
   cross_group_retry: boolean
 }

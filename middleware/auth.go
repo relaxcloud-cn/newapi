@@ -402,6 +402,21 @@ func TokenAuth() func(c *gin.Context) {
 			logger.LogDebug(c, "Client IP %s passed the token IP restrictions check", clientIp)
 		}
 
+		if token.MacCheckEnabled {
+			clientMac := c.Request.Header.Get("X-Client-Mac")
+			allowed, err := tokenAllowsMac(token, clientMac)
+			if err != nil {
+				common.SysLog(fmt.Sprintf("TokenAuth invalid MAC whitelist configuration for token %d: %v", token.Id, err))
+				abortWithOpenAiMessage(c, http.StatusInternalServerError, "MAC address whitelist configuration is invalid")
+				return
+			}
+			if !allowed {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "Your MAC address is not allowed by this token", types.ErrorCodeAccessDenied)
+				return
+			}
+			logger.LogDebug(c, "Client MAC %s passed the token MAC restrictions check", clientMac)
+		}
+
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("TokenAuth GetUserCache error for user %d: %v", token.UserId, err))
@@ -442,6 +457,30 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+func tokenAllowsMac(token *model.Token, clientMac string) (bool, error) {
+	if token == nil {
+		return false, fmt.Errorf("token is nil")
+	}
+	if !token.MacCheckEnabled {
+		return true, nil
+	}
+
+	normalizedClientMac, err := common.NormalizeMacAddress(clientMac)
+	if err != nil {
+		return false, nil
+	}
+	for _, allowedMac := range token.GetMacLimits() {
+		normalizedAllowedMac, err := common.NormalizeMacAddress(allowedMac)
+		if err != nil {
+			return false, err
+		}
+		if normalizedClientMac == normalizedAllowedMac {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func SetupContextForToken(c *gin.Context, token *model.Token, parts ...string) error {

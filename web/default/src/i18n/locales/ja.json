@@ -5178,6 +5178,14 @@
     "Zero retention": "データ保持なし",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V 4",
-    "Zoom": "ズーム"
+    "Zoom": "ズーム",
+    "MAC Address Validation": "MACアドレス検証",
+    "MAC Address Whitelist": "MACアドレス許可リスト",
+    "MAC validation requires at least one allowed MAC address": "MAC検証を有効にするには、許可するMACアドレスを1つ以上指定してください",
+    "One MAC address per line": "1行に1つのMACアドレス",
+    "Enter a valid MAC address on each line": "各行に有効なMACアドレスを入力してください",
+    "Require X-Client-Mac to match this API key's whitelist": "X-Client-Mac がこの API キーの許可リストと一致することを要求します",
+    "MAC Restriction": "MAC 制限",
+    "{{count}} MAC(s)": "{{count}} 個の MAC"
   }
 }

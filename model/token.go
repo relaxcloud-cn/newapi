@@ -25,6 +25,8 @@ type Token struct {
 	ModelLimitsEnabled bool           `json:"model_limits_enabled"`
 	ModelLimits        string         `json:"model_limits" gorm:"type:text"`
 	AllowIps           *string        `json:"allow_ips" gorm:"default:''"`
+	MacCheckEnabled    bool           `json:"mac_check_enabled"`
+	AllowMacs          *string        `json:"allow_macs" gorm:"type:text"`
 	UsedQuota          int            `json:"used_quota" gorm:"default:0"` // used quota
 	Group              string         `json:"group" gorm:"default:''"`
 	CrossGroupRetry    bool           `json:"cross_group_retry"` // 跨分组重试，仅auto分组有效
@@ -78,11 +80,64 @@ func (token *Token) GetIpLimits() []string {
 	return ipLimits
 }
 
-func GetAllUserTokens(userId int, startIdx int, num int) ([]*Token, error) {
-	var tokens []*Token
-	var err error
-	err = DB.Where("user_id = ?", userId).Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
-	return tokens, err
+func (token *Token) GetMacLimits() []string {
+	macLimits := make([]string, 0)
+	if token.AllowMacs == nil {
+		return macLimits
+	}
+	cleanMacs := strings.ReplaceAll(*token.AllowMacs, " ", "")
+	if cleanMacs == "" {
+		return macLimits
+	}
+	for _, mac := range strings.Split(cleanMacs, "\n") {
+		mac = strings.TrimSpace(strings.ReplaceAll(mac, ",", ""))
+		if mac != "" {
+			macLimits = append(macLimits, mac)
+		}
+	}
+	return macLimits
+}
+
+func (token *Token) NormalizeMacLimits() error {
+	macLimits := token.GetMacLimits()
+	if len(macLimits) == 0 {
+		empty := ""
+		token.AllowMacs = &empty
+		if token.MacCheckEnabled {
+			return errors.New("MAC address whitelist is required when MAC validation is enabled")
+		}
+		return nil
+	}
+
+	normalizedMacs := make([]string, 0, len(macLimits))
+	seen := make(map[string]struct{}, len(macLimits))
+	for _, mac := range macLimits {
+		normalizedMac, err := common.NormalizeMacAddress(mac)
+		if err != nil {
+			return err
+		}
+		if _, exists := seen[normalizedMac]; exists {
+			continue
+		}
+		seen[normalizedMac] = struct{}{}
+		normalizedMacs = append(normalizedMacs, normalizedMac)
+	}
+
+	normalized := strings.Join(normalizedMacs, "\n")
+	token.AllowMacs = &normalized
+	return nil
+}
+
+func GetAllUserTokens(userId int, groups []string, startIdx int, num int) (tokens []*Token, total int64, err error) {
+	query := DB.Model(&Token{}).Where("user_id = ?", userId)
+	if len(groups) > 0 {
+		query = query.Where(map[string]interface{}{"group": groups})
+	}
+	if err = query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	err = query.Order("id desc").Limit(num).Offset(startIdx).Find(&tokens).Error
+	return tokens, total, err
 }
 
 // sanitizeLikePattern 校验并清洗用户输入的 LIKE 搜索模式。
@@ -129,9 +184,20 @@ func validateLikePattern(input string) error {
 	return nil
 }
 
+func sanitizeContainsLikePattern(input string) (string, error) {
+	pattern, err := sanitizeLikePattern(input)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(pattern, "%") {
+		return pattern, nil
+	}
+	return "%" + pattern + "%", nil
+}
+
 const searchHardLimit = 100
 
-func SearchUserTokens(userId int, keyword string, token string, offset int, limit int) (tokens []*Token, total int64, err error) {
+func SearchUserTokens(userId int, keyword string, token string, groups []string, offset int, limit int) (tokens []*Token, total int64, err error) {
 	// model 层强制截断
 	if limit <= 0 || limit > searchHardLimit {
 		limit = searchHardLimit
@@ -146,7 +212,7 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 
 	// 超量用户（令牌数超过上限）只允许精确搜索，禁止模糊搜索
 	maxTokens := operation_setting.GetMaxUserTokens()
-	hasFuzzy := strings.Contains(keyword, "%") || strings.Contains(token, "%")
+	hasFuzzy := keyword != "" || token != ""
 	if hasFuzzy {
 		count, err := CountUserTokens(userId)
 		if err != nil {
@@ -154,26 +220,37 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 			return nil, 0, errors.New("获取令牌数量失败")
 		}
 		if int(count) > maxTokens {
-			return nil, 0, errors.New("令牌数量超过上限，仅允许精确搜索，请勿使用 % 通配符")
+			return nil, 0, errors.New("令牌数量超过上限，仅允许精确搜索")
 		}
 	}
 
 	baseQuery := DB.Model(&Token{}).Where("user_id = ?", userId)
+	if len(groups) > 0 {
+		baseQuery = baseQuery.Where(map[string]interface{}{"group": groups})
+	}
 
 	// 非空才加 LIKE 条件，空则跳过（不过滤该字段）
 	if keyword != "" {
-		keywordPattern, err := sanitizeLikePattern(keyword)
+		keywordPattern, err := sanitizeContainsLikePattern(keyword)
 		if err != nil {
 			return nil, 0, err
 		}
 		baseQuery = baseQuery.Where("name LIKE ? ESCAPE '!'", keywordPattern)
 	}
 	if token != "" {
-		tokenPattern, err := sanitizeLikePattern(token)
+		tokenPattern, err := sanitizeContainsLikePattern(token)
 		if err != nil {
 			return nil, 0, err
 		}
-		baseQuery = baseQuery.Where(commonKeyCol+" LIKE ? ESCAPE '!'", tokenPattern)
+		keyCol := commonKeyCol
+		if keyCol == "" {
+			if common.UsingMainDatabase(common.DatabaseTypePostgreSQL) {
+				keyCol = `"key"`
+			} else {
+				keyCol = "`key`"
+			}
+		}
+		baseQuery = baseQuery.Where(keyCol+" LIKE ? ESCAPE '!'", tokenPattern)
 	}
 
 	// 先查匹配总数（用于分页，受 maxTokens 上限保护，避免全表 COUNT）
@@ -302,7 +379,7 @@ func (token *Token) Update() (err error) {
 		}
 	}()
 	err = DB.Model(token).Select("name", "status", "expired_time", "remain_quota", "unlimited_quota",
-		"model_limits_enabled", "model_limits", "allow_ips", "group", "cross_group_retry").Updates(token).Error
+		"model_limits_enabled", "model_limits", "allow_ips", "mac_check_enabled", "allow_macs", "group", "cross_group_retry").Updates(token).Error
 	return err
 }
 

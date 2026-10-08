@@ -16,6 +16,8 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -29,6 +31,7 @@ type tokenAPIResponse struct {
 
 type tokenPageResponse struct {
 	Items []tokenResponseItem `json:"items"`
+	Total int                 `json:"total"`
 }
 
 type tokenResponseItem struct {
@@ -310,6 +313,11 @@ func runTokenMigrationCompatibilityTest(t *testing.T, db *gorm.DB, dialect strin
 	}
 
 	migrateTokenControllerTestDB(t, db)
+	for _, column := range []string{"mac_check_enabled", "allow_macs"} {
+		if !db.Migrator().HasColumn(&model.Token{}, column) {
+			t.Fatalf("expected migrated token schema to contain %s", column)
+		}
+	}
 
 	if got := getTokenKeyColumnType(t, db, dialect); got != "varchar(128)" {
 		t.Fatalf("expected migrated key column type varchar(128), got %q", got)
@@ -417,6 +425,55 @@ func TestGetAllTokensMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestGetAllTokensFiltersByGroup(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "premium-token", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	seedToken(t, db, 1, "default-token", "mnop1234qrst5678")
+	otherUser := seedToken(t, db, 2, "other-user-premium", "uvwx1234yzab5678")
+	require.NoError(t, db.Model(otherUser).Update("group", "premium").Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?group=premium&p=1&size=10", nil, 1)
+	GetAllTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "premium-token", page.Items[0].Name)
+}
+
+func TestGetAllTokensFiltersByMultipleGroups(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "premium-token", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	standard := seedToken(t, db, 1, "standard-token", "mnop1234qrst5678")
+	require.NoError(t, db.Model(standard).Update("group", "standard").Error)
+	defaultToken := seedToken(t, db, 1, "default-token", "ijkl1234mnop5678")
+	otherUser := seedToken(t, db, 2, "other-user-premium", "uvwx1234yzab5678")
+	require.NoError(t, db.Model(otherUser).Update("group", "premium").Error)
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/?group=premium&group=standard&p=1&size=10", nil, 1)
+	GetAllTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	assert.ElementsMatch(t, []string{"premium-token", "standard-token"}, []string{
+		page.Items[0].Name,
+		page.Items[1].Name,
+	})
+	assert.NotEqual(t, defaultToken.Name, page.Items[0].Name)
+	assert.NotEqual(t, defaultToken.Name, page.Items[1].Name)
+}
+
 func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "searchable-token", "ijkl1234mnop5678")
@@ -444,6 +501,83 @@ func TestSearchTokensMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestSearchTokensKeywordMatchesNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	seedToken(t, db, 1, "north-beijing-token", "abcd1234efgh5678")
+	seedToken(t, db, 1, "shanghai-token", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "north-beijing-token", page.Items[0].Name)
+}
+
+func TestSearchTokensCombinesGroupAndNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "north-beijing-premium", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	seedToken(t, db, 1, "north-beijing-default", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&group=premium&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 1, page.Total)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "north-beijing-premium", page.Items[0].Name)
+}
+
+func TestSearchTokensCombinesMultipleGroupsAndNameSubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	premium := seedToken(t, db, 1, "north-beijing-premium", "abcd1234efgh5678")
+	require.NoError(t, db.Model(premium).Update("group", "premium").Error)
+	standard := seedToken(t, db, 1, "north-beijing-standard", "mnop1234qrst5678")
+	require.NoError(t, db.Model(standard).Update("group", "standard").Error)
+	seedToken(t, db, 1, "north-beijing-default", "ijkl1234mnop5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?keyword=beijing&group=premium&group=standard&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Equal(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	assert.ElementsMatch(t, []string{"north-beijing-premium", "north-beijing-standard"}, []string{
+		page.Items[0].Name,
+		page.Items[1].Name,
+	})
+}
+
+func TestSearchTokensTokenMatchesKeySubstring(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	seedToken(t, db, 1, "matching-key-token", "abcd1234efgh5678")
+	seedToken(t, db, 1, "other-key-token", "mnop1234qrst5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/token/search?token=efgh&p=1&size=10", nil, 1)
+	SearchTokens(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var page tokenPageResponse
+	require.NoError(t, common.Unmarshal(response.Data, &page))
+	require.Len(t, page.Items, 1)
+	require.Equal(t, "matching-key-token", page.Items[0].Name)
+}
+
 func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "detail-token", "qrst1234uvwx5678")
@@ -469,6 +603,33 @@ func TestGetTokenMasksKeyInResponse(t *testing.T) {
 	}
 }
 
+func TestAddTokenPersistsMacValidation(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	body := map[string]any{
+		"name":                 "mac-restricted-token",
+		"expired_time":         -1,
+		"unlimited_quota":      true,
+		"model_limits_enabled": false,
+		"model_limits":         "",
+		"mac_check_enabled":    true,
+		"allow_macs":           "94-B6-09-F6-4F-41",
+		"group":                "default",
+		"cross_group_retry":    false,
+	}
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodPost, "/api/token/", body, 1)
+	AddToken(ctx)
+
+	response := decodeAPIResponse(t, recorder)
+	require.True(t, response.Success, "expected success response, got message: %s", response.Message)
+
+	var created model.Token
+	require.NoError(t, db.First(&created, "user_id = ? AND name = ?", 1, "mac-restricted-token").Error)
+	require.True(t, created.MacCheckEnabled)
+	require.NotNil(t, created.AllowMacs)
+	require.Equal(t, "94:b6:09:f6:4f:41", *created.AllowMacs)
+}
+
 func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 	token := seedToken(t, db, 1, "editable-token", "yzab1234cdef5678")
@@ -481,6 +642,8 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 		"unlimited_quota":      true,
 		"model_limits_enabled": false,
 		"model_limits":         "",
+		"mac_check_enabled":    true,
+		"allow_macs":           "94-B6-09-F6-4F-41\n00:11:22:33:44:55",
 		"group":                "default",
 		"cross_group_retry":    false,
 	}
@@ -503,6 +666,12 @@ func TestUpdateTokenMasksKeyInResponse(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), token.Key) {
 		t.Fatalf("update response leaked raw token key: %s", recorder.Body.String())
 	}
+
+	var updated model.Token
+	require.NoError(t, db.First(&updated, token.Id).Error)
+	require.True(t, updated.MacCheckEnabled)
+	require.NotNil(t, updated.AllowMacs)
+	require.Equal(t, "94:b6:09:f6:4f:41\n00:11:22:33:44:55", *updated.AllowMacs)
 }
 
 func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {

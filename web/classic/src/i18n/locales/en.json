@@ -3830,6 +3830,10 @@
     "默认折叠侧边栏": "Default collapse sidebar",
     "默认测试模型": "Default Test Model",
     "默认用户消息": "Default User Message",
-    "默认补全倍率": "Default completion ratio"
+    "默认补全倍率": "Default completion ratio",
+    "MAC Address Validation": "MAC Address Validation",
+    "MAC Address Whitelist": "MAC Address Whitelist",
+    "One MAC address per line": "One MAC address per line",
+    "Require X-Client-Mac to match this API key's whitelist": "Require X-Client-Mac to match this API key's whitelist"
   }
 }

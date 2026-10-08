@@ -43,6 +43,7 @@ import {
   ApiKeyCell,
   ModelLimitsCell,
   IpRestrictionsCell,
+  MacRestrictionsCell,
 } from './api-keys-cells'
 import { DataTableRowActions } from './data-table-row-actions'
 
@@ -238,6 +239,7 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
           </TruncatedCell>
         )
       },
+      filterFn: (row, id, value) => value.includes(String(row.getValue(id))),
       size: 160,
       meta: { mobileHidden: true },
     },
@@ -255,6 +257,15 @@ export function useApiKeysColumns(now: number): ColumnDef<ApiKey>[] {
       accessorKey: 'allow_ips',
       header: t('IP Restriction'),
       cell: ({ row }) => <IpRestrictionsCell apiKey={row.original} />,
+      enableSorting: false,
+      size: 160,
+      meta: { mobileHidden: true },
+    },
+    {
+      id: 'allow_macs',
+      accessorKey: 'allow_macs',
+      header: t('MAC Restriction'),
+      cell: ({ row }) => <MacRestrictionsCell apiKey={row.original} />,
       enableSorting: false,
       size: 160,
       meta: { mobileHidden: true },

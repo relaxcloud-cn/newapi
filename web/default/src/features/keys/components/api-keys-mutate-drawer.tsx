@@ -249,6 +249,7 @@ export function ApiKeysMutateDrawer({
     : t('Enter quota in {{currency}}', { currency: currencyLabel })
   const selectedGroup = form.watch('group')
   const unlimitedQuota = form.watch('unlimited_quota')
+  const macCheckEnabled = form.watch('mac_check_enabled')
 
   return (
     <Sheet
@@ -580,6 +581,52 @@ export function ApiKeysMutateDrawer({
                         </FormItem>
                       )}
                     />
+
+                    <FormField
+                      control={form.control}
+                      name='mac_check_enabled'
+                      render={({ field }) => (
+                        <FormItem className={sideDrawerSwitchItemClassName()}>
+                          <div className='flex flex-col gap-0.5'>
+                            <FormLabel className='text-sm'>
+                              {t('MAC Address Validation')}
+                            </FormLabel>
+                            <FormDescription className='text-xs'>
+                              {t(
+                                "Require X-Client-Mac to match this API key's whitelist"
+                              )}
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    {macCheckEnabled && (
+                      <FormField
+                        control={form.control}
+                        name='allow_macs'
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>{t('MAC Address Whitelist')}</FormLabel>
+                            <FormControl>
+                              <Textarea
+                                {...field}
+                                className='min-h-20 resize-none'
+                                placeholder={t('One MAC address per line')}
+                                rows={3}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
+                    )}
                   </div>
                 </CollapsibleContent>
               </SideDrawerSection>
