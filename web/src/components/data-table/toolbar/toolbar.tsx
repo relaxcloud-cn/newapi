@@ -42,6 +42,8 @@ type FilterDef = {
     count?: number
   }[]
   singleSelect?: boolean
+  allOptionValue?: string
+  showCounts?: boolean
 }
 
 type SearchDraft = {
@@ -272,6 +274,8 @@ export function DataTableToolbar<TData>(props: DataTableToolbarProps<TData>) {
             title={filter.title}
             options={filter.options}
             singleSelect={filter.singleSelect}
+            allOptionValue={filter.allOptionValue}
+            showCounts={filter.showCounts}
           />
         )
       }),

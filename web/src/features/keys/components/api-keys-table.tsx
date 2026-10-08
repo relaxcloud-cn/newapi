@@ -20,7 +20,7 @@ import { useQuery } from '@tanstack/react-query'
 import { getRouteApi } from '@tanstack/react-router'
 import { flexRender, type Table as TanstackTable } from '@tanstack/react-table'
 import { Database } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import {
@@ -41,6 +41,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
+import { getUserGroups } from '@/lib/api'
 import { createServerError } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 
@@ -244,6 +245,13 @@ export function ApiKeysTable() {
     globalFilter: { enabled: true, key: 'filter' },
     columnFilters: [
       { columnId: 'status', searchKey: 'status', type: 'array' },
+      {
+        columnId: 'group',
+        searchKey: 'group',
+        type: 'array',
+        deserialize: (value) =>
+          Array.isArray(value) ? value.filter((group) => group !== 'all') : [],
+      },
       { columnId: '_tokenSearch', searchKey: 'token', type: 'string' },
     ],
   })
@@ -257,7 +265,30 @@ export function ApiKeysTable() {
     columnId: '_tokenSearch',
     onColumnFiltersChange,
   })
+  const selectedGroups = useMemo(
+    () =>
+      (
+        (columnFilters.find((filter) => filter.id === 'group')
+          ?.value as string[]) || []
+      ).filter((group) => group !== 'all'),
+    [columnFilters]
+  )
   const shouldSearch = Boolean(globalFilter?.trim() || tokenFilter.trim())
+
+  const { data: groupsData } = useQuery({
+    queryKey: ['user-groups'],
+    queryFn: getUserGroups,
+  })
+  const groupFilterOptions = useMemo(
+    () => [
+      { label: t('All Groups'), value: 'all' },
+      ...Object.keys(groupsData?.data || {}).map((group) => ({
+        label: group,
+        value: group,
+      })),
+    ],
+    [groupsData, t]
+  )
 
   // Fetch data with React Query
   // eslint-disable-next-line @tanstack/query/exhaustive-deps
@@ -268,6 +299,7 @@ export function ApiKeysTable() {
       pagination.pageSize,
       globalFilter,
       tokenFilter,
+      selectedGroups,
       refreshTrigger,
     ],
     queryFn: async () => {
@@ -275,10 +307,12 @@ export function ApiKeysTable() {
         ? await searchApiKeys({
             keyword: globalFilter,
             token: tokenFilter,
+            groups: selectedGroups,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
         : await getApiKeys({
+            groups: selectedGroups,
             p: pagination.pageIndex + 1,
             size: pagination.pageSize,
           })
@@ -368,6 +402,13 @@ export function ApiKeysTable() {
             title: t('Status'),
             options: API_KEY_STATUS_OPTIONS,
             singleSelect: true,
+          },
+          {
+            columnId: 'group',
+            title: t('Group'),
+            options: groupFilterOptions,
+            allOptionValue: 'all',
+            showCounts: false,
           },
         ],
       }}

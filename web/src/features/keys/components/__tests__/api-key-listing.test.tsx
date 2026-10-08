@@ -465,9 +465,12 @@ it('keeps full mobile information without group or quota section headings', asyn
     expect(screen.getByText(zh.translation['Created'])).toBeInTheDocument()
     expect(screen.getByText(zh.translation['Last Used'])).toBeInTheDocument()
     expect(screen.getByText(zh.translation['Expires'])).toBeInTheDocument()
-    expect(
-      screen.queryByText(zh.translation['Group'], { exact: true })
-    ).not.toBeInTheDocument()
+    // 移动端卡片不渲染 "Group" 小节标题；工具栏的分组筛选按钮除外
+    for (const el of screen.queryAllByText(zh.translation['Group'], {
+      exact: true,
+    })) {
+      expect(el.closest('button')).not.toBeNull()
+    }
     expect(screen.getByText('default')).toBeInTheDocument()
     expect(screen.getByText('1x')).toBeInTheDocument()
     expect(screen.getByText(zh.translation['Models'])).toBeInTheDocument()
