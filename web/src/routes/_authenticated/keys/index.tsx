@@ -29,6 +29,7 @@ const apiKeySearchSchema = z.object({
     .array(z.enum(API_KEY_STATUS_OPTIONS.map((s) => s.value as `${number}`)))
     .optional()
     .catch([]),
+  group: z.array(z.string()).optional().catch([]),
   filter: z.string().optional().catch(''),
   token: z.string().optional().catch(''),
 })

@@ -61,6 +61,7 @@ export interface ApiResponse<T = unknown> {
 }
 
 export interface GetApiKeysParams {
+  groups?: string[]
   p?: number
   size?: number
 }
@@ -79,6 +80,7 @@ export interface GetApiKeysResponse {
 export interface SearchApiKeysParams {
   keyword?: string
   token?: string
+  groups?: string[]
   p?: number
   size?: number
 }
