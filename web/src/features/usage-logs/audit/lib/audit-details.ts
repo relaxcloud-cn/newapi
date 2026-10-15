@@ -114,6 +114,10 @@ export function auditFieldLabel(key: string, t: TFunction): string {
       return t('Model Limits')
     case 'allow_ips':
       return t('IP Whitelist (supports CIDR)')
+    case 'mac_check_enabled':
+      return t('MAC Address Validation')
+    case 'allow_macs':
+      return t('MAC Address Whitelist')
     case 'auto_groups':
       return t('Auto Group Chain')
     case 'cross_group_retry':
