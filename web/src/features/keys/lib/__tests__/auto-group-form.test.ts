@@ -54,6 +54,56 @@ const baseApiKey: ApiKey = {
 }
 
 describe('API key Auto group form mapping', () => {
+  test('preserves MAC restrictions when editing and accepts EUI-48 formats', () => {
+    const defaults = transformApiKeyToFormDefaults({
+      ...baseApiKey,
+      group: 'default',
+      mac_check_enabled: true,
+      allow_macs: 'AA-BB-CC-DD-EE-FF\n0011.2233.4455',
+    })
+    expect(getApiKeyFormSchema(t).safeParse(defaults).success).toBe(true)
+    expect(transformFormDataToPayload(defaults)).toMatchObject({
+      mac_check_enabled: true,
+      allow_macs: 'AA-BB-CC-DD-EE-FF\n0011.2233.4455',
+    })
+    expect(transformApiKeyToFormDefaults(baseApiKey).mac_check_enabled).toBe(
+      false
+    )
+  })
+
+  test.each(['', 'bad', 'aa:bb:cc:dd:ee:ff:00:11', 'aa-bb:cc:dd:ee:ff'])(
+    'rejects an enabled MAC policy with invalid addresses: %s',
+    (allow_macs) => {
+      const result = getApiKeyFormSchema(t).safeParse({
+        ...getApiKeyFormDefaultValues(false),
+        name: 'restricted',
+        unlimited_quota: true,
+        mac_check_enabled: true,
+        allow_macs,
+      })
+      expect(result.success).toBe(false)
+      if (!result.success) {
+        expect(result.error.issues.map((issue) => issue.path)).toContainEqual([
+          'allow_macs',
+        ])
+      }
+    }
+  )
+
+  test('allows clearing the whitelist when MAC validation is disabled', () => {
+    const values = {
+      ...getApiKeyFormDefaultValues(false),
+      name: 'unrestricted',
+      mac_check_enabled: false,
+      allow_macs: '',
+    }
+    expect(getApiKeyFormSchema(t).safeParse(values).success).toBe(true)
+    expect(transformFormDataToPayload(values)).toMatchObject({
+      mac_check_enabled: false,
+      allow_macs: '',
+    })
+  })
+
   test('treats legacy token responses without auto_groups as inheritance', () => {
     const legacyApiKey: Record<string, unknown> = { ...baseApiKey }
     delete legacyApiKey.auto_groups

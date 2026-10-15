@@ -34,7 +34,9 @@ func (input *tokenAutoGroupsInput) UnmarshalJSON(data []byte) error {
 
 type tokenRequest struct {
 	model.Token
-	AutoGroups tokenAutoGroupsInput `json:"auto_groups"`
+	AutoGroups      tokenAutoGroupsInput `json:"auto_groups"`
+	MacCheckEnabled *bool                `json:"mac_check_enabled"`
+	AllowMacs       *string              `json:"allow_macs"`
 }
 
 type tokenResponse struct {
@@ -284,12 +286,20 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
+	if request.MacCheckEnabled != nil {
+		token.MacCheckEnabled = *request.MacCheckEnabled
+	}
+	token.AllowMacs = request.AllowMacs
 	if len(token.Name) > 50 {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
 	params := tokenAuditParams(c)
 	params["name"] = token.Name
+	if err := token.NormalizeMacLimits(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 	// 非无限额度时，检查额度值是否超出有效范围
 	if !token.UnlimitedQuota {
 		if token.RemainQuota < 0 {
@@ -342,6 +352,8 @@ func AddToken(c *gin.Context) {
 		ModelLimitsEnabled: token.ModelLimitsEnabled,
 		ModelLimits:        token.ModelLimits,
 		AllowIps:           token.AllowIps,
+		MacCheckEnabled:    token.MacCheckEnabled,
+		AllowMacs:          token.AllowMacs,
 		Group:              token.Group,
 		CrossGroupRetry:    token.CrossGroupRetry,
 		AutoGroups:         token.AutoGroups,
@@ -431,6 +443,19 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.Status = token.Status
 	} else {
 		// If you add more fields, please also update token.Update()
+		// Legacy clients may omit MAC fields; omission must not remove a restriction.
+		token.MacCheckEnabled = cleanToken.MacCheckEnabled
+		token.AllowMacs = cleanToken.AllowMacs
+		if request.MacCheckEnabled != nil {
+			token.MacCheckEnabled = *request.MacCheckEnabled
+		}
+		if request.AllowMacs != nil {
+			token.AllowMacs = request.AllowMacs
+		}
+		if err := token.NormalizeMacLimits(); err != nil {
+			common.ApiError(c, err)
+			return
+		}
 		cleanToken.Name = token.Name
 		cleanToken.ExpiredTime = token.ExpiredTime
 		cleanToken.RemainQuota = token.RemainQuota
@@ -438,6 +463,8 @@ func UpdateToken(c *gin.Context) {
 		cleanToken.ModelLimitsEnabled = token.ModelLimitsEnabled
 		cleanToken.ModelLimits = token.ModelLimits
 		cleanToken.AllowIps = token.AllowIps
+		cleanToken.MacCheckEnabled = token.MacCheckEnabled
+		cleanToken.AllowMacs = token.AllowMacs
 		cleanToken.Group = token.Group
 		cleanToken.CrossGroupRetry = token.CrossGroupRetry
 		if token.Group != "auto" {
@@ -471,6 +498,8 @@ func UpdateToken(c *gin.Context) {
 			{"model_limits", previous.ModelLimits != cleanToken.ModelLimits},
 			{"allow_ips", (previous.AllowIps == nil) != (cleanToken.AllowIps == nil) ||
 				(previous.AllowIps != nil && cleanToken.AllowIps != nil && *previous.AllowIps != *cleanToken.AllowIps)},
+			{"mac_check_enabled", previous.MacCheckEnabled != cleanToken.MacCheckEnabled},
+			{"allow_macs", strings.Join(previous.GetMacLimits(), "\n") != strings.Join(cleanToken.GetMacLimits(), "\n")},
 			{"group", previous.Group != cleanToken.Group},
 			{"cross_group_retry", previous.CrossGroupRetry != cleanToken.CrossGroupRetry},
 			{"auto_groups", previous.AutoGroups != cleanToken.AutoGroups},

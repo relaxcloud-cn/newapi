@@ -204,6 +204,38 @@ afterEach(() => {
 })
 
 describe('API keys mutate drawer Auto group integration', () => {
+  test('requires a MAC whitelist, saves it, and warns that the header is forgeable', async () => {
+    const createdPayloads: Array<Record<string, unknown>> = []
+    installApiFixtures(createdPayloads)
+    await renderCreateDrawer()
+    changeInput(getControlByLabel('Name'), 'restricted')
+    fireEvent.click(screen.getByRole('button', { name: /Advanced Settings/ }))
+    fireEvent.click(
+      screen.getByRole('switch', { name: 'MAC Address Validation' })
+    )
+    fireEvent.click(findButton('Save changes', true))
+    expect(
+      await screen.findByText(
+        'MAC validation requires at least one allowed MAC address'
+      )
+    ).toBeInTheDocument()
+    expect(createdPayloads).toHaveLength(0)
+    expect(
+      screen.getByText(
+        'Clients must send X-Client-Mac. This header can be forged and does not verify the physical device.'
+      )
+    ).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('MAC Address Whitelist'), {
+      target: { value: 'AA-BB-CC-DD-EE-FF' },
+    })
+    fireEvent.click(findButton('Save changes', true))
+    await waitFor(() => expect(createdPayloads).toHaveLength(1))
+    expect(createdPayloads[0]).toMatchObject({
+      mac_check_enabled: true,
+      allow_macs: 'AA-BB-CC-DD-EE-FF',
+    })
+  })
+
   test('inherits the root Auto order and sends an empty override for every batch-created key', async () => {
     const createdPayloads: Array<Record<string, unknown>> = []
     installApiFixtures(createdPayloads)

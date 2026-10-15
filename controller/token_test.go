@@ -2,10 +2,12 @@ package controller
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -17,14 +19,18 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 type tokenAPIResponse struct {
@@ -404,6 +410,281 @@ func runTokenMigrationCompatibilityTest(t *testing.T, db *gorm.DB, dialect strin
 	}
 }
 
+// Token schema from relaxcloud/main v1.0.0-rc.41, before MAC policies.
+type tokenBeforeMAC struct {
+	Id                 int    `gorm:"primaryKey"`
+	UserId             int    `gorm:"index"`
+	Key                string `gorm:"type:varchar(128);uniqueIndex"`
+	Status             int    `gorm:"default:1"`
+	Name               string `gorm:"index"`
+	CreatedTime        int64  `gorm:"bigint"`
+	AccessedTime       int64  `gorm:"bigint"`
+	ExpiredTime        int64  `gorm:"bigint;default:-1"`
+	RemainQuota        int    `gorm:"default:0"`
+	UnlimitedQuota     bool
+	ModelLimitsEnabled bool
+	ModelLimits        string  `gorm:"type:text"`
+	AllowIps           *string `gorm:"default:''"`
+	UsedQuota          int     `gorm:"default:0"`
+	Group              string  `gorm:"default:''"`
+	CrossGroupRetry    bool
+	AutoGroups         string         `gorm:"type:text"`
+	DeletedAt          gorm.DeletedAt `gorm:"index"`
+}
+
+func (tokenBeforeMAC) TableName() string { return "tokens" }
+
+func TestTokenMACDatabaseMatrix(t *testing.T) {
+	for _, database := range []struct {
+		name, env string
+		typ       common.DatabaseType
+	}{
+		{"sqlite", "", common.DatabaseTypeSQLite},
+		{"mysql", "TEST_MYSQL_DSN", common.DatabaseTypeMySQL},
+		{"postgres", "TEST_POSTGRES_DSN", common.DatabaseTypePostgreSQL},
+	} {
+		for _, upgrade := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/upgrade=%v", database.name, upgrade), func(t *testing.T) {
+				dsn := os.Getenv(database.env)
+				if database.env != "" && dsn == "" {
+					t.Skip(database.env + " is not configured")
+				}
+				previousDB, previousLogDB := model.DB, model.LOG_DB
+				previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+				previousRedis, previousRDB := common.RedisEnabled, common.RDB
+				previousMaster, previousMemory := common.IsMasterNode, common.MemoryCacheEnabled
+				t.Cleanup(func() {
+					model.DB, model.LOG_DB = previousDB, previousLogDB
+					common.SetDatabaseTypes(previousMain, previousLog)
+					common.RedisEnabled, common.RDB = previousRedis, previousRDB
+					common.IsMasterNode, common.MemoryCacheEnabled = previousMaster, previousMemory
+				})
+				common.RedisEnabled, common.IsMasterNode, common.MemoryCacheEnabled = false, false, false
+				db, _ := newAuditTestDatabase(t, database.name, dsn)
+				sqlDB, err := db.DB()
+				require.NoError(t, err)
+				t.Cleanup(func() { _ = sqlDB.Close() })
+				model.DB = db
+				common.SetDatabaseTypes(database.typ, database.typ)
+				t.Setenv("LOG_SQL_DSN", "")
+				require.NoError(t, model.InitLogDB())
+				versionSQL := "SELECT version()"
+				if database.name == "sqlite" {
+					versionSQL = "SELECT sqlite_version()"
+				}
+				var version string
+				require.NoError(t, db.Raw(versionSQL).Scan(&version).Error)
+				t.Logf("database version: %s", version)
+
+				legacy := tokenBeforeMAC{
+					UserId: 7, Key: "existingrc41key", Name: "existing-rc41",
+					Status: common.TokenStatusEnabled, ExpiredTime: -1,
+					RemainQuota: 123, UsedQuota: 45, UnlimitedQuota: true,
+					ModelLimitsEnabled: true, ModelLimits: "gpt-test",
+					Group: "auto", AutoGroups: `["default"]`,
+					AllowIps: common.GetPointer("192.0.2.1"),
+				}
+				if upgrade {
+					require.NoError(t, db.AutoMigrate(&tokenBeforeMAC{}))
+					require.NoError(t, db.Create(&legacy).Error)
+				}
+				require.NoError(t, db.AutoMigrate(&model.Token{}))
+				var migrationSQL strings.Builder
+				migrationDB := db.Session(&gorm.Session{Logger: gormlogger.New(
+					log.New(&migrationSQL, "", 0),
+					gormlogger.Config{LogLevel: gormlogger.Info},
+				)})
+				require.NoError(t, migrationDB.AutoMigrate(&model.Token{}))
+				assert.NotContains(t, strings.ToUpper(migrationSQL.String()), "ALTER TABLE", "second migration must not change the schema")
+				for _, index := range []string{"idx_tokens_key", "idx_tokens_user_id", "idx_tokens_name", "idx_tokens_deleted_at"} {
+					assert.True(t, db.Migrator().HasIndex(&model.Token{}, index), index)
+				}
+				if upgrade {
+					var after tokenBeforeMAC
+					require.NoError(t, db.First(&after, legacy.Id).Error)
+					assert.Equal(t, legacy, after, "all existing token data must survive migration")
+					var upgraded model.Token
+					require.NoError(t, db.First(&upgraded, legacy.Id).Error)
+					assert.False(t, upgraded.MacCheckEnabled)
+					assert.Empty(t, upgraded.GetMacLimits())
+					duplicate := model.Token{Key: legacy.Key}
+					require.Error(t, db.Create(&duplicate).Error, "key uniqueness must survive migration")
+				}
+				require.NoError(t, db.AutoMigrate(&model.User{}))
+				user := model.User{Username: "mac-owner", Status: common.UserStatusEnabled, Group: "default"}
+				require.NoError(t, db.Create(&user).Error)
+				for _, cached := range []bool{false, true} {
+					t.Run(fmt.Sprintf("redis=%v", cached), func(t *testing.T) {
+						common.RedisEnabled = cached
+						if cached {
+							addr := os.Getenv("TEST_REDIS_ADDR")
+							if addr == "" {
+								addr = miniredis.RunT(t).Addr()
+							}
+							client := redis.NewClient(&redis.Options{Addr: addr})
+							require.NoError(t, client.Ping(context.Background()).Err())
+							common.RDB = client
+							t.Cleanup(func() { _ = client.Close(); common.RedisEnabled = false })
+						}
+						verifyTokenMACPolicy(t, db, user.Id)
+					})
+				}
+			})
+		}
+	}
+}
+
+func verifyTokenMACPolicy(t *testing.T, db *gorm.DB, userID int) {
+	t.Helper()
+	name := fmt.Sprintf("mac-policy-%v", common.RedisEnabled)
+	create, response := newAuthenticatedContext(t, http.MethodPost, "/api/token/", map[string]any{
+		"name": name, "expired_time": -1, "unlimited_quota": true,
+		"mac_check_enabled": true, "allow_macs": "AA-BB-CC-DD-EE-FF\naa:bb:cc:dd:ee:ff\n0011.2233.4455",
+	}, userID)
+	AddToken(create)
+	require.True(t, decodeAPIResponse(t, response).Success, response.Body.String())
+	var token model.Token
+	require.NoError(t, db.First(&token, "name = ?", name).Error)
+	assert.True(t, token.MacCheckEnabled)
+	assert.Equal(t, "aa:bb:cc:dd:ee:ff\n00:11:22:33:44:55", *token.AllowMacs)
+
+	engine := gin.New()
+	require.NoError(t, engine.SetTrustedProxies(nil))
+	engine.GET("/v1/models", middleware.TokenAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	engine.GET("/usage", middleware.TokenAuthReadOnly(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	check := func(path, mac, key string, status int) {
+		t.Helper()
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer sk-"+key)
+		if mac != "" {
+			request.Header.Set("X-Client-Mac", mac)
+		}
+		result := httptest.NewRecorder()
+		engine.ServeHTTP(result, request)
+		require.Equal(t, status, result.Code, "%s %s: %s", path, mac, result.Body.String())
+	}
+	cacheKey := fmt.Sprintf("token:%s", common.GenerateHMAC(token.Key))
+	if common.RedisEnabled {
+		// A pre-upgrade hash does not contain MAC policy fields. It must fall
+		// back to the DB, without extending its TTL or replacing live quota.
+		require.NoError(t, common.RDB.HSet(context.Background(), cacheKey, map[string]any{
+			"Id": token.Id, "UserId": userID, "Status": 1, "ExpiredTime": -1,
+			"UnlimitedQuota": "true", "RemainQuota": 73,
+		}).Err())
+		require.NoError(t, common.RDB.Expire(context.Background(), cacheKey, time.Second).Err())
+		check("/v1/models", "", token.Key, http.StatusForbidden)
+		ttl, err := common.RDB.TTL(context.Background(), cacheKey).Result()
+		require.NoError(t, err)
+		assert.LessOrEqual(t, ttl, time.Second)
+		assert.Equal(t, "73", common.RDB.HGet(context.Background(), cacheKey, "RemainQuota").Val())
+		require.NoError(t, common.RDB.Del(context.Background(), cacheKey).Err())
+	}
+	for _, path := range []string{"/v1/models", "/usage"} {
+		for _, tc := range []struct {
+			mac    string
+			status int
+		}{
+			{"", 403}, {"invalid", 403}, {"aa:bb:cc:dd:ee:ff:00:11", 403},
+			{"11:22:33:44:55:66", 403}, {"AA-BB-CC-DD-EE-FF", 204}, {"0011.2233.4455", 204},
+		} {
+			check(path, tc.mac, token.Key, tc.status)
+		}
+		check(path, "AA:BB:CC:DD:EE:FF", "invalidkey", http.StatusUnauthorized)
+	}
+	if common.RedisEnabled {
+		assert.Equal(t, "true", common.RDB.HGet(context.Background(), cacheKey, "MacCheckEnabled").Val())
+		assert.Equal(t, *token.AllowMacs, common.RDB.HGet(context.Background(), cacheKey, "AllowMacs").Val())
+	}
+	for _, tc := range []struct {
+		name, path string
+		owner      int
+		fields     map[string]any
+		success    bool
+	}{
+		{"foreign owner", "/api/token/", userID + 1, map[string]any{"mac_check_enabled": false}, false},
+		{"empty whitelist", "/api/token/", userID, map[string]any{"allow_macs": ""}, false},
+		{"bad whitelist", "/api/token/", userID, map[string]any{"allow_macs": "aa:bb:cc:dd:ee:ff\ninvalid"}, false},
+		{"legacy client omission", "/api/token/", userID, map[string]any{}, true},
+		{"disable token only", "/api/token/?status_only=true", userID, map[string]any{"status": 2}, true},
+		{"enable token only", "/api/token/?status_only=true", userID, map[string]any{"status": 1}, true},
+		{"narrow whitelist", "/api/token/", userID, map[string]any{"allow_macs": "00:11:22:33:44:55"}, true},
+		{"turn off MAC policy", "/api/token/", userID, map[string]any{"mac_check_enabled": false, "allow_macs": ""}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := map[string]any{"id": token.Id, "name": name, "expired_time": -1, "unlimited_quota": true}
+			for key, value := range tc.fields {
+				payload[key] = value
+			}
+			c, result := newAuthenticatedContext(t, http.MethodPut, tc.path, payload, tc.owner)
+			UpdateToken(c)
+			require.Equal(t, tc.success, decodeAPIResponse(t, result).Success, result.Body.String())
+			switch tc.name {
+			case "disable token only":
+				check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 401)
+				check("/usage", "AA:BB:CC:DD:EE:FF", token.Key, 401)
+			case "narrow whitelist":
+				check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 403)
+				check("/v1/models", "00:11:22:33:44:55", token.Key, 204)
+			case "turn off MAC policy":
+				check("/v1/models", "", token.Key, 204)
+			default:
+				check("/v1/models", "", token.Key, 403)
+				check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 204)
+			}
+		})
+	}
+	require.NoError(t, db.First(&token, token.Id).Error)
+	token.ExpiredTime = common.GetTimestamp() - 1
+	require.NoError(t, token.Update())
+	check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 401)
+	token.ExpiredTime, token.Status = -1, common.TokenStatusEnabled
+	token.MacCheckEnabled, token.AllowMacs = true, common.GetPointer("aa:bb:cc:dd:ee:ff\ninvalid")
+	require.NoError(t, token.Update())
+	check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 500)
+	require.NoError(t, token.Delete())
+	check("/v1/models", "AA:BB:CC:DD:EE:FF", token.Key, 401)
+}
+
+func TestTokenMACRejectsInvalidCreation(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	for _, macs := range []string{"", "invalid", "aa:bb:cc:dd:ee:ff:00:11", "aa:bb:cc:dd:ee:ff,00:11:22:33:44:55"} {
+		c, response := newAuthenticatedContext(t, http.MethodPost, "/api/token/", map[string]any{
+			"name": "invalid-policy", "unlimited_quota": true, "mac_check_enabled": true, "allow_macs": macs,
+		}, 7)
+		AddToken(c)
+		assert.False(t, decodeAPIResponse(t, response).Success)
+	}
+	var count int64
+	require.NoError(t, db.Model(&model.Token{}).Count(&count).Error)
+	assert.Zero(t, count)
+}
+
+func TestTokenMACWebSocketRechecksPolicyBetweenTurns(t *testing.T) {
+	_, token := setupResponsesWSRequestTest(t)
+	runner, _ := newResponsesWSTestRunner(t, token)
+	token.MacCheckEnabled = true
+	token.AllowMacs = common.GetPointer("aa:bb:cc:dd:ee:ff")
+	require.NoError(t, token.Update())
+	request := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"input":"hello"}`))
+	// A turn cannot replace the handshake's original headers.
+	request.Header.Set("X-Client-Mac", "aa:bb:cc:dd:ee:ff")
+	called := false
+	apiErr := runner(request, "mac-restricted-turn", func(c *gin.Context) *types.NewAPIError {
+		called = true
+		return nil
+	})
+	require.NotNil(t, apiErr)
+	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+	assert.False(t, called)
+	token.MacCheckEnabled = false
+	require.NoError(t, token.Update())
+	require.Nil(t, runner(request, "mac-unrestricted-turn", func(c *gin.Context) *types.NewAPIError {
+		called = true
+		return nil
+	}))
+	assert.True(t, called)
+}
+
 func TestTokenAutoMigrateUsesVarchar128KeyColumn(t *testing.T) {
 	db := setupTokenControllerTestDB(t)
 
@@ -743,7 +1024,8 @@ func TestAPITokenAuditDatabaseMatrix(t *testing.T) {
 				db, _ := newAuditTestDatabase(t, database.name, dsn)
 				model.DB = db
 				common.SetDatabaseTypes(database.typ, database.typ)
-				require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}))
+				require.NoError(t, db.AutoMigrate(&model.User{}, &model.UserSession{}, &model.Token{}, &model.Option{}))
+				require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(common.GetTimestamp()))
 				// Initialize production column quoting as well as the existing audit table.
 				require.NoError(t, model.InitLogDB())
 				if separateLog {
@@ -815,6 +1097,7 @@ func verifyAPITokenAudit(t *testing.T) {
 		{name: "normalized update", method: "PUT", path: "/", body: `{"id":$id,"name":"renamed","expired_time":-1,"remain_quota":200,"unlimited_quota":true,"group":"default","cross_group_retry":true,"allow_ips":""}`, action: "token.update", success: true, params: `{"id":$id,"name":"renamed","changed_fields":["name","remain_quota","group","cross_group_retry","auto_groups"]}`},
 		{name: "configuration values stay private", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":42,"remain_quota":100,"unlimited_quota":false,"model_limits_enabled":true,"model_limits":"private-model-configuration","allow_ips":"203.0.113.57","group":"auto","cross_group_retry":true}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":["expired_time","unlimited_quota","model_limits_enabled","model_limits","allow_ips"]}`},
 		{name: "unchanged update", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":-1,"remain_quota":100,"unlimited_quota":true,"group":"auto","cross_group_retry":true,"allow_ips":""}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":[]}`},
+		{name: "MAC policy audit excludes addresses", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":-1,"remain_quota":100,"unlimited_quota":true,"group":"auto","cross_group_retry":true,"allow_ips":"","mac_check_enabled":true,"allow_macs":"AA-BB-CC-DD-EE-FF"}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":["mac_check_enabled","allow_macs"]}`},
 		{name: "successful response exceeds audit buffer", method: "PUT", path: "/", body: `{"id":$id,"name":"owned","expired_time":-1,"remain_quota":100,"unlimited_quota":true,"group":"auto","cross_group_retry":true,"allow_ips":"","model_limits":"` + strings.Repeat("m", 64*1024-128) + `"}`, action: "token.update", success: true, params: `{"id":$id,"name":"owned","changed_fields":["model_limits"]}`},
 		{name: "update storage failure", method: "PUT", path: "/", body: `{"id":$id,"name":"failed-rename","unlimited_quota":true}`, action: "token.update", params: `{"id":$id,"name":"owned"}`, failWrite: true},
 		{name: "foreign update", method: "PUT", path: "/", body: `{"id":$other,"name":"forged-name","unlimited_quota":true}`, action: "token.update", params: `{"id":$other}`},

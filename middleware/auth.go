@@ -495,6 +495,19 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			return
 		}
 
+		if token.MacCheckEnabled {
+			allowed, err := tokenAllowsMac(token, c.GetHeader("X-Client-Mac"))
+			if err != nil {
+				common.SysLog(fmt.Sprintf("TokenAuth invalid MAC whitelist configuration for token %d", token.Id))
+				abortWithOpenAiMessage(c, http.StatusInternalServerError, "MAC address whitelist configuration is invalid")
+				return
+			}
+			if !allowed {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "Your MAC address is not allowed by this token", types.ErrorCodeAccessDenied)
+				return
+			}
+		}
+
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("TokenAuthReadOnly GetUserCache error for user %d: %v", token.UserId, err))
@@ -600,6 +613,19 @@ func TokenAuth() func(c *gin.Context) {
 			logger.LogDebug(c, "Client IP %s passed the token IP restrictions check", clientIp)
 		}
 
+		if token.MacCheckEnabled {
+			allowed, err := tokenAllowsMac(token, c.GetHeader("X-Client-Mac"))
+			if err != nil {
+				common.SysLog(fmt.Sprintf("TokenAuth invalid MAC whitelist configuration for token %d", token.Id))
+				abortWithOpenAiMessage(c, http.StatusInternalServerError, "MAC address whitelist configuration is invalid")
+				return
+			}
+			if !allowed {
+				abortWithOpenAiMessage(c, http.StatusForbidden, "Your MAC address is not allowed by this token", types.ErrorCodeAccessDenied)
+				return
+			}
+		}
+
 		userCache, err := model.GetUserCache(token.UserId)
 		if err != nil {
 			common.SysLog(fmt.Sprintf("TokenAuth GetUserCache error for user %d: %v", token.UserId, err))
@@ -640,6 +666,32 @@ func TokenAuth() func(c *gin.Context) {
 		}
 		c.Next()
 	}
+}
+
+// tokenAllowsMac checks a client-supplied identifier, not hardware identity.
+// It supplements API key authentication and must not be treated as device attestation.
+func tokenAllowsMac(token *model.Token, clientMac string) (bool, error) {
+	if token == nil {
+		return false, fmt.Errorf("token is nil")
+	}
+	if !token.MacCheckEnabled {
+		return true, nil
+	}
+	normalizedClientMac, err := common.NormalizeMacAddress(clientMac)
+	if err != nil {
+		return false, nil
+	}
+	allowed := false
+	for _, allowedMac := range token.GetMacLimits() {
+		normalizedAllowedMac, err := common.NormalizeMacAddress(allowedMac)
+		if err != nil {
+			return false, err
+		}
+		if normalizedClientMac == normalizedAllowedMac {
+			allowed = true
+		}
+	}
+	return allowed, nil
 }
 
 func applyWebSocketSubprotocolAuthorization(header http.Header) bool {

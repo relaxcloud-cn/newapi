@@ -175,6 +175,30 @@ export function IpRestrictionsCell(props: ApiKeyRestrictionProps) {
   )
 }
 
+export function MacRestrictionsCell(props: ApiKeyRestrictionProps) {
+  const { t } = useTranslation()
+  const macs = props.apiKey.mac_check_enabled
+    ? (props.apiKey.allow_macs || '')
+        .split('\n')
+        .map((mac) => mac.trim())
+        .filter(Boolean)
+    : []
+
+  return (
+    <ApiKeyRestrictionCell
+      items={macs}
+      label={t('{{count}} MAC(s)', { count: macs.length })}
+      title={t('MAC Restriction')}
+      emptyLabel={
+        props.apiKey.mac_check_enabled
+          ? t('No MAC addresses allowed')
+          : t('No restriction')
+      }
+      detailsTrigger={props.detailsTrigger}
+    />
+  )
+}
+
 function ApiKeyRestrictionCell(props: {
   items: string[]
   label: string

@@ -40,6 +40,8 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       unlimited_quota: z.boolean(),
       model_limits: z.array(z.string()),
       allow_ips: z.string().optional(),
+      mac_check_enabled: z.boolean(),
+      allow_macs: z.string().optional(),
       group: z.string().optional(),
       auto_groups_mode: z.enum(['inherit', 'custom']),
       auto_groups: z.array(z.string()),
@@ -47,6 +49,28 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
       tokenCount: z.number().min(1).optional(),
     })
     .superRefine((data, ctx) => {
+      const macAddresses = (data.allow_macs || '')
+        .split('\n')
+        .map((mac) => mac.trim())
+        .filter(Boolean)
+      if (data.mac_check_enabled && macAddresses.length === 0) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['allow_macs'],
+          message: t(
+            'MAC validation requires at least one allowed MAC address'
+          ),
+        })
+      }
+      const validMacPattern =
+        /^(?:([0-9a-f]{2})([:-])(?:[0-9a-f]{2}\2){4}[0-9a-f]{2}|[0-9a-f]{4}(?:\.[0-9a-f]{4}){2})$/i
+      if (macAddresses.some((mac) => !validMacPattern.test(mac))) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['allow_macs'],
+          message: t('Enter a valid MAC address on each line'),
+        })
+      }
       if (data.group === 'auto') {
         if (
           data.auto_groups_mode === 'custom' &&
@@ -110,6 +134,8 @@ export const API_KEY_FORM_DEFAULT_VALUES: ApiKeyFormValues = {
   unlimited_quota: true,
   model_limits: [],
   allow_ips: '',
+  mac_check_enabled: false,
+  allow_macs: '',
   group: DEFAULT_GROUP,
   auto_groups_mode: 'inherit',
   auto_groups: [],
@@ -151,6 +177,8 @@ export function transformFormDataToPayload(
     model_limits_enabled: data.model_limits.length > 0,
     model_limits: data.model_limits.join(','),
     allow_ips: data.allow_ips || '',
+    mac_check_enabled: data.mac_check_enabled,
+    allow_macs: data.allow_macs || '',
     group: data.group || '',
     auto_groups:
       data.group === 'auto' && data.auto_groups_mode === 'custom'
@@ -189,6 +217,8 @@ export function transformApiKeyToFormDefaults(
       ? apiKey.model_limits.split(',').filter(Boolean)
       : [],
     allow_ips: apiKey.allow_ips || '',
+    mac_check_enabled: apiKey.mac_check_enabled ?? false,
+    allow_macs: apiKey.allow_macs || '',
     group: apiKey.group || DEFAULT_GROUP,
     auto_groups_mode: autoGroupsMode,
     auto_groups: autoGroups,
