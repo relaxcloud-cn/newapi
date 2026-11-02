@@ -11,7 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var expectedKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu"}
+var expectedKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "typesafe", "vertex-ai", "vidu", "xai"}
+var expectedResponseKeys = []string{"alibaba", "doubao", "google", "hailuo", "jimeng", "kling", "sora", "sunoapi", "vertex-ai", "vidu", "xai"}
 
 func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()
@@ -36,6 +37,22 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{"POST", "/doubao/api/v3/contents/generations/tasks", "doubao", jsplugin.RouteTypeSubmit, "", "taskCreated"},
 		{"GET", "/doubao/api/v3/contents/generations/tasks/:task_id", "doubao", jsplugin.RouteTypeQuery, "", "taskStatus"},
 		{"POST", "/doubao/api/v3/images/generations", "doubao", jsplugin.RouteTypeSubmit, "", "imageCreated"},
+		{"POST", "/xai/v1/videos/generations", "xai", jsplugin.RouteTypeSubmit, "", "videoCreated"},
+		{"POST", "/xai/v1/videos/edits", "xai", jsplugin.RouteTypeSubmit, "", "videoCreated"},
+		{"POST", "/xai/v1/videos/extensions", "xai", jsplugin.RouteTypeSubmit, "", "videoCreated"},
+		{"GET", "/xai/v1/videos/:request_id", "xai", jsplugin.RouteTypeQuery, "", "videoStatus"},
+		{"POST", "/hailuo/v1/video_generation", "hailuo", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"GET", "/hailuo/v1/query/video_generation/:task_id", "hailuo", jsplugin.RouteTypeQuery, "", "taskStatus"},
+		{"POST", "/hailuo/v2/video_generation", "hailuo", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"GET", "/hailuo/v2/query/video_generation/:task_id", "hailuo", jsplugin.RouteTypeQuery, "", "h3TaskStatus"},
+		{"POST", "/vidu/ent/v2/text2video", "vidu", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"POST", "/vidu/ent/v2/img2video", "vidu", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"POST", "/vidu/ent/v2/start-end2video", "vidu", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"POST", "/vidu/ent/v2/reference2video", "vidu", jsplugin.RouteTypeSubmit, "", "taskCreated"},
+		{"GET", "/vidu/ent/v2/tasks/:task_id/creations", "vidu", jsplugin.RouteTypeQuery, "", "taskStatus"},
+		{"POST", "/google/v1beta/models/:model", "google", jsplugin.RouteTypeSubmit, "", "operation"},
+		{"GET", "/google/v1beta/models/:model/operations/:task_id", "google", jsplugin.RouteTypeQuery, "", "operation"},
+		{"POST", "/vertex-ai/v1/projects/:project/locations/:location/publishers/google/models/:model", "vertex-ai", jsplugin.RouteTypeDynamic, "", "operation"},
 	}
 	for _, expected := range routes {
 		t.Run(expected.method+" "+expected.path, func(t *testing.T) {
@@ -66,6 +83,7 @@ func TestBuiltInVendorPluginsDeclareNativeRoutesAndLegacyChannelTypes(t *testing
 		{51, "jimeng"},
 		{54, "doubao"},
 		{55, "sora"},
+		{48, "xai"},
 	}
 	for _, channelType := range channelTypes {
 		plugin, found := generation.GetByChannelType(channelType.value)
@@ -88,7 +106,7 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 	}
 	assert.Equal(t, expectedKeys, actualKeys)
 
-	for _, key := range expectedKeys {
+	for _, key := range expectedResponseKeys {
 		t.Run(key, func(t *testing.T) {
 			_, found := generation.Get(key)
 			require.True(t, found, "factory plugin was excluded from the active generation")
@@ -131,9 +149,64 @@ func TestBuiltInTaskPluginResponsesAndUsageContracts(t *testing.T) {
 	}
 }
 
+func TestBuiltInTypeSafePluginV120(t *testing.T) {
+	source, err := Source("typesafe")
+	require.NoError(t, err)
+	registry := jsplugin.NewRegistry()
+	plugin, err := registry.RegisterFactory(source, jsplugin.Options{Key: "typesafe"})
+	require.NoError(t, err)
+	require.Equal(t, "1.2.0", plugin.Meta.Version)
+	require.Equal(t, []string{"jev-1.14.0", "jev-1.13.0", "jev-latest", "jev-preview"}, plugin.Meta.Models)
+
+	route, found := registry.Generation().LookupDeclaredRoute("POST", "/typesafe/v1/systemone")
+	require.True(t, found)
+	require.Same(t, plugin, route.Plugin)
+	require.Equal(t, jsplugin.RouteTypeSubmit, route.Route.Type)
+	require.Equal(t, "decodeSystemOne", route.Route.Decode)
+	require.Equal(t, "renderSystemOne", route.Route.Render)
+
+	requestBody := map[string]any{
+		"model": "jev-1.14.0",
+		"state": "A customer needs a refund.",
+		"questions": map[string]any{
+			"refund": map[string]any{
+				"type":     "choice",
+				"criteria": map[string]any{"yes": "Refund is appropriate", "no": "Refund is not appropriate"},
+			},
+		},
+	}
+	value, err := plugin.Engine.Call(t.Context(), "buildSubmitRequest", map[string]any{
+		"baseUrl":       "https://api.typesafe.ai",
+		"apiKey":        "typesafe-key",
+		"requestBody":   requestBody,
+		"model":         "jev-1.14.0",
+		"upstreamModel": "jev-1.14.0",
+		"upstream":      map[string]any{"kind": "new_api"},
+	})
+	require.NoError(t, err)
+	var submit map[string]any
+	encoded, err := common.Marshal(value)
+	require.NoError(t, err)
+	require.NoError(t, common.Unmarshal(encoded, &submit))
+	assert.Equal(t, "https://api.typesafe.ai/typesafe/v1/systemone", submit["url"])
+	assert.Equal(t, "POST", submit["method"])
+
+	usage, err := plugin.Engine.Call(t.Context(), "extractUsage", map[string]any{
+		"requestBody":   requestBody,
+		"model":         "jev-1.14.0",
+		"upstreamModel": "jev-1.14.0",
+	})
+	require.NoError(t, err)
+	var facts map[string]any
+	encoded, err = common.Marshal(usage)
+	require.NoError(t, err)
+	require.NoError(t, common.Unmarshal(encoded, &facts))
+	assert.Equal(t, float64(65792), facts["input_tokens"])
+}
+
 func TestBuiltInResponsesDecodersEchoChannelMappedAlias(t *testing.T) {
 	bodyOverrides := map[string]map[string]any{}
-	for _, key := range expectedKeys {
+	for _, key := range expectedResponseKeys {
 		t.Run(key, func(t *testing.T) {
 			source, sourceErr := Source(key)
 			require.NoError(t, sourceErr)
@@ -166,11 +239,6 @@ func TestBuiltInResponsesDecodersEchoChannelMappedAlias(t *testing.T) {
 func TestBuiltInPluginsAddressNewAPIUpstreamOnNativeRoutes(t *testing.T) {
 	generation := jsplugin.DefaultRegistry.Generation()
 	require.NotNil(t, generation)
-	for _, key := range []string{"hailuo", "google", "vidu", "vertex-ai"} {
-		plugin, found := generation.Get(key)
-		require.True(t, found, key)
-		assert.False(t, plugin.Meta.SupportsUpstream(jsplugin.UpstreamKindNewAPI), "%s has no native routes and must not be bindable to a New API channel", key)
-	}
 
 	const base = "https://upstream.example"
 	cases := []struct {
@@ -247,6 +315,36 @@ func TestBuiltInPluginsAddressNewAPIUpstreamOnNativeRoutes(t *testing.T) {
 			vendorQuery:      "/v1/videos/tid",
 			gatewayQuery:     "/v1/videos/tid",
 			content:          "/v1/videos/tid/content",
+		},
+		{
+			key:              "xai",
+			driver:           map[string]any{"action": "text_to_video", "model": "grok-imagine-video", "upstreamModel": "grok-imagine-video", "requestBody": map[string]any{"model": "grok-imagine-video", "prompt": "a cat"}},
+			vendorKey:        "vendor-key",
+			vendorAuthPrefix: "Bearer vendor-key",
+			vendorSubmit:     "/v1/videos/generations",
+			gatewaySubmit:    "/xai/v1/videos/generations",
+			vendorQuery:      "/v1/videos/tid",
+			gatewayQuery:     "/xai/v1/videos/tid",
+		},
+		{
+			key:              "hailuo",
+			driver:           map[string]any{"action": "text_to_video", "model": "MiniMax-Hailuo-2.3", "upstreamModel": "MiniMax-Hailuo-2.3", "requestBody": map[string]any{"model": "MiniMax-Hailuo-2.3", "prompt": "a cat"}},
+			vendorKey:        "vendor-key",
+			vendorAuthPrefix: "Bearer vendor-key",
+			vendorSubmit:     "/v1/video_generation",
+			gatewaySubmit:    "/hailuo/v1/video_generation",
+			vendorQuery:      "/v1/query/video_generation?task_id=tid",
+			gatewayQuery:     "/hailuo/v1/query/video_generation/tid",
+		},
+		{
+			key:              "vidu",
+			driver:           map[string]any{"action": "text_to_video", "model": "viduq2", "upstreamModel": "viduq2", "requestBody": map[string]any{"model": "viduq2", "prompt": "a cat"}},
+			vendorKey:        "vendor-key",
+			vendorAuthPrefix: "Token vendor-key",
+			vendorSubmit:     "/ent/v2/text2video",
+			gatewaySubmit:    "/vidu/ent/v2/text2video",
+			vendorQuery:      "/ent/v2/tasks/tid/creations",
+			gatewayQuery:     "/vidu/ent/v2/tasks/tid/creations",
 		},
 	}
 	variants := []struct {
