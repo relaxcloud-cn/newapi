@@ -70,8 +70,10 @@ if redis.call('EXISTS', KEYS[2]) == 1 then
   return 0
 end
 if redis.call('EXISTS', KEYS[1]) == 1 then
-  if redis.call('HEXISTS', KEYS[1], 'MacCheckEnabled') == 1 and redis.call('HEXISTS', KEYS[1], 'AllowMacs') == 1 then
-    redis.call('EXPIRE', KEYS[1], ARGV[17])
+  if redis.call('HEXISTS', KEYS[1], 'AllowUserQuotaQuery') == 1 and
+      redis.call('HEXISTS', KEYS[1], 'MacCheckEnabled') == 1 and
+      redis.call('HEXISTS', KEYS[1], 'AllowMacs') == 1 then
+    redis.call('EXPIRE', KEYS[1], ARGV[18])
   end
   return 2
 end
@@ -81,8 +83,8 @@ redis.call('HSET', KEYS[1],
   'UnlimitedQuota', ARGV[8], 'ModelLimitsEnabled', ARGV[9], 'ModelLimits', ARGV[10],
   'AllowIps', ARGV[11], 'Group', ARGV[12], 'CrossGroupRetry', ARGV[13],
   'AutoGroups', ARGV[14], 'RemainQuota', ARGV[15], 'UsedQuota', ARGV[16],
-  'MacCheckEnabled', ARGV[18], 'AllowMacs', ARGV[19])
-redis.call('EXPIRE', KEYS[1], ARGV[17])
+  'AllowUserQuotaQuery', ARGV[17], 'MacCheckEnabled', ARGV[19], 'AllowMacs', ARGV[20])
+redis.call('EXPIRE', KEYS[1], ARGV[18])
 return 1`
 
 	return common.RDB.Eval(context.Background(), script, []string{
@@ -93,6 +95,7 @@ return 1`
 		strconv.FormatBool(token.UnlimitedQuota), strconv.FormatBool(token.ModelLimitsEnabled),
 		token.ModelLimits, allowIps, token.Group, strconv.FormatBool(token.CrossGroupRetry),
 		token.AutoGroups, token.RemainQuota, token.UsedQuota,
+		strconv.FormatBool(token.AllowUserQuotaQuery),
 		tokenCacheTTLSeconds(),
 		strconv.FormatBool(token.MacCheckEnabled), allowMacs,
 	).Int()
@@ -104,7 +107,7 @@ func cacheGetTokenByKey(key string) (*Token, error) {
 		return nil, fmt.Errorf("redis is not enabled")
 	}
 	var token Token
-	if err := common.RedisHGetObj(getTokenCacheKey(key), &token, "MacCheckEnabled", "AllowMacs"); err != nil {
+	if err := common.RedisHGetObj(getTokenCacheKey(key), &token, "MacCheckEnabled", "AllowMacs", "AllowUserQuotaQuery"); err != nil {
 		return nil, err
 	}
 	if token.Id <= 0 {

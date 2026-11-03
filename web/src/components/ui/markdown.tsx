@@ -187,6 +187,7 @@ function renderMath(source: string, displayMode: boolean): string {
     displayMode,
     output: 'htmlAndMathml',
     throwOnError: false,
+    trust: false,
   })
 }
 
