@@ -7381,6 +7381,8 @@
     "© 2025 Your Company. All rights reserved.": "© 2025 Votre entreprise. Tous droits réservés.",
     "、": ", ",
     "，": ", ",
-    "，and ": " et "
+    "，and ": " et ",
+    "Context window": "Fenêtre de contexte",
+    "Context {{context_length}} / Output {{max_output_tokens}}": "Contexte {{context_length}} / Sortie {{max_output_tokens}}"
   }
 }

@@ -7381,6 +7381,8 @@
     "© 2025 Your Company. All rights reserved.": "© 2025 Ваша Компания. Все права защищены.",
     "、": ", ",
     "，": ", ",
-    "，and ": " и "
+    "，and ": " и ",
+    "Context window": "Контекстное окно",
+    "Context {{context_length}} / Output {{max_output_tokens}}": "Контекст {{context_length}} / Вывод {{max_output_tokens}}"
   }
 }

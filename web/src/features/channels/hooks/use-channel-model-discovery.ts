@@ -25,6 +25,14 @@ import { fetchModels, fetchUpstreamModels } from '../api'
 type DiscoveryState = {
   status: 'idle' | 'loading' | 'success' | 'error' | 'stale'
   models: string[]
+  contextMetadata?: Record<
+    string,
+    {
+      context_length?: number
+      context_window?: number
+      max_output_tokens?: number
+    }
+  >
   error?: unknown
 }
 
@@ -69,12 +77,17 @@ export function useChannelModelDiscovery(props: ChannelModelDiscoveryProps) {
       if (!response.success) {
         throw createServerError(response, 'Failed to fetch models')
       }
-      setState({ status: 'success', models: response.data ?? [] })
+      setState({
+        status: 'success',
+        models: response.data ?? [],
+        contextMetadata: response.context_metadata,
+      })
     } catch (error) {
       if (requestSequence !== sequence.current) return
       setState((previous) => ({
         status: 'error',
         models: previous.models,
+        contextMetadata: previous.contextMetadata,
         error,
       }))
     }

@@ -27,12 +27,16 @@ import (
 )
 
 type OpenAIModel struct {
-	ID         string         `json:"id"`
-	Object     string         `json:"object"`
-	Created    int64          `json:"created"`
-	OwnedBy    string         `json:"owned_by"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Permission []struct {
+	ID              string         `json:"id"`
+	Object          string         `json:"object"`
+	Created         int64          `json:"created"`
+	OwnedBy         string         `json:"owned_by"`
+	ContextLength   any            `json:"context_length"`
+	ContextWindow   any            `json:"context_window"`
+	MaxOutputTokens any            `json:"max_output_tokens"`
+	MaxModelLen     any            `json:"max_model_len"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	Permission      []struct {
 		ID                 string `json:"id"`
 		Object             string `json:"object"`
 		Created            int64  `json:"created"`
@@ -336,12 +340,20 @@ func FetchUpstreamModels(c *gin.Context) {
 		common.ApiErrorT(c, "Failed to fetch models: {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
+	if _, err := fetchAndPersistChannelModelContextMetadata(channel, ids); err != nil {
+		common.SysLog(common.LogText("model context detection failed: %v", err))
+	}
+	contextMetadata := model.GetModelContextMetadataForModels(ids)
 
-	c.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"success": true,
 		"message": "",
 		"data":    ids,
-	})
+	}
+	if len(contextMetadata) > 0 {
+		response["context_metadata"] = contextMetadata
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func FixChannelsAbilities(c *gin.Context) {
@@ -1467,11 +1479,21 @@ func FetchModels(c *gin.Context) {
 		common.ApiErrorT(c, "Failed to fetch models: {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
+	// Direct /v1/models metadata is always persisted. Active probing is
+	// opt-in and uses the fetched model IDs, including unsaved previews.
+	if _, detectErr := fetchAndPersistChannelModelContextMetadata(channel, models); detectErr != nil {
+		common.SysLog(common.LogText("model context detection failed: %v", detectErr))
+	}
+	contextMetadata := model.GetModelContextMetadataForModels(models)
+	response := gin.H{
 		"success": true,
 		"message": "",
 		"data":    models,
-	})
+	}
+	if len(contextMetadata) > 0 {
+		response["context_metadata"] = contextMetadata
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 func BatchSetChannelTag(c *gin.Context) {
