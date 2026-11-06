@@ -71,6 +71,24 @@ func TestParseOpenAIModelIDsStrictResponseContract(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIModelMetadata(t *testing.T) {
+	ids, metadata, err := parseOpenAIModelMetadata([]byte(`{
+		"data": [{
+			"id": "systemone",
+			"context_length": 393216,
+			"context_window": 393216,
+			"max_output_tokens": 131072
+		}]
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"systemone"}, ids)
+	require.Equal(t, model.ModelContextMetadata{
+		ContextLength:   393216,
+		ContextWindow:   393216,
+		MaxOutputTokens: 131072,
+	}, metadata["systemone"])
+}
+
 func TestFetchAdvancedCustomModelsAppliesHeaderOverrideAfterRouteAuth(t *testing.T) {
 	type receivedRequest struct {
 		Headers http.Header

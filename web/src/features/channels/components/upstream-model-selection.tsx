@@ -36,6 +36,8 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
 
 import {
   categorizeModels,
@@ -59,10 +61,20 @@ type ModelCategoryProps = {
   onChange: (models: string[]) => void
   onRedirectModel?: (model: string) => void
   aliases?: Record<string, string>
+  contextMetadata?: Record<
+    string,
+    {
+      context_length?: number
+      context_window?: number
+      max_output_tokens?: number
+    }
+  >
 }
 
 function ModelCategory(props: ModelCategoryProps) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
+  const locale =
+    toIntlLocale(i18n.resolvedLanguage || i18n.language) ?? 'en-US'
   const categoryName = props.name === 'Other' ? t('Other') : props.name
   const id = useId()
   const selected = new Set(props.selected)
@@ -156,6 +168,15 @@ function ModelCategory(props: ModelCategoryProps) {
                   </TooltipContent>
                 </Tooltip>
               )}
+              {props.contextMetadata?.[model] && (
+                <span className='text-muted-foreground ml-auto shrink-0 text-xs'>
+                  {formatModelContextMetadata(
+                    t,
+                    locale,
+                    props.contextMetadata[model]
+                  )}
+                </span>
+              )}
               {props.onRedirectModel && (
                 <Button
                   type='button'
@@ -177,6 +198,27 @@ function ModelCategory(props: ModelCategoryProps) {
   )
 }
 
+function formatModelContextMetadata(
+  t: (key: string, values?: Record<string, unknown>) => string,
+  locale: string,
+  metadata: {
+    context_length?: number
+    context_window?: number
+    max_output_tokens?: number
+  }
+): string {
+  const parts: string[] = []
+  if (metadata.context_length) {
+    parts.push(
+      t('Context {{context_length}} / Output {{max_output_tokens}}', {
+        context_length: formatNumber(metadata.context_length, locale),
+        max_output_tokens: formatNumber(metadata.max_output_tokens, locale),
+      })
+    )
+  }
+  return parts.join('')
+}
+
 type ChangeTab = 'new' | 'existing' | 'removed'
 
 type UpstreamModelSelectionProps = {
@@ -192,6 +234,14 @@ type UpstreamModelSelectionProps = {
   onRedirectModel?: (model: string) => void
   /** Upstream model name to the request name it is published under. */
   aliases?: Record<string, string>
+  contextMetadata?: Record<
+    string,
+    {
+      context_length?: number
+      context_window?: number
+      max_output_tokens?: number
+    }
+  >
 }
 
 export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
@@ -351,6 +401,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
                 onChange={props.onChange}
                 onRedirectModel={props.onRedirectModel}
                 aliases={props.aliases}
+                contextMetadata={props.contextMetadata}
               />
             ))}
           </TabsContent>
@@ -391,6 +442,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
                 onChange={props.onChange}
                 onRedirectModel={props.onRedirectModel}
                 aliases={props.aliases}
+                contextMetadata={props.contextMetadata}
               />
             </TabsContent>
           )}
@@ -407,6 +459,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
               onChange={props.onChange}
               onRedirectModel={props.onRedirectModel}
               aliases={props.aliases}
+              contextMetadata={props.contextMetadata}
             />
           ))}
           {!categorized.filtered.length && (

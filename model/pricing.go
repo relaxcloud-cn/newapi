@@ -30,6 +30,9 @@ type Pricing struct {
 	Description            string                               `json:"description,omitempty"`
 	Icon                   string                               `json:"icon,omitempty"`
 	Tags                   string                               `json:"tags,omitempty"`
+	ContextLength          int                                  `json:"context_length,omitempty"`
+	ContextWindow          int                                  `json:"context_window,omitempty"`
+	MaxOutputTokens        int                                  `json:"max_output_tokens,omitempty"`
 	VendorID               int                                  `json:"vendor_id,omitempty"`
 	QuotaType              int                                  `json:"quota_type"`
 	ModelRatio             float64                              `json:"model_ratio"`
@@ -65,9 +68,12 @@ var (
 	updatePricingLock    sync.Mutex
 
 	// 缓存映射：模型名 -> 启用分组 / 计费类型
-	modelEnableGroups     = make(map[string][]string)
-	modelQuotaTypeMap     = make(map[string]int)
-	modelEnableGroupsLock = sync.RWMutex{}
+	modelEnableGroups      = make(map[string][]string)
+	modelQuotaTypeMap      = make(map[string]int)
+	modelContextLengthMap  = make(map[string]int)
+	modelContextWindowMap  = make(map[string]int)
+	modelMaxOutputTokenMap = make(map[string]int)
+	modelEnableGroupsLock  = sync.RWMutex{}
 )
 
 var (
@@ -117,6 +123,30 @@ func GetModelSupportEndpointTypes(model string) []constant.EndpointType {
 		return endpoints
 	}
 	return make([]constant.EndpointType, 0)
+}
+
+// GetModelContextLength returns the model metadata context limit in tokens.
+func GetModelContextLength(modelName string) int {
+	modelEnableGroupsLock.RLock()
+	length := modelContextLengthMap[modelName]
+	modelEnableGroupsLock.RUnlock()
+	return length
+}
+
+// GetModelContextWindow returns the model metadata context window in tokens.
+func GetModelContextWindow(modelName string) int {
+	modelEnableGroupsLock.RLock()
+	length := modelContextWindowMap[modelName]
+	modelEnableGroupsLock.RUnlock()
+	return length
+}
+
+// GetModelMaxOutputTokens returns the model metadata output limit in tokens.
+func GetModelMaxOutputTokens(modelName string) int {
+	modelEnableGroupsLock.RLock()
+	limit := modelMaxOutputTokenMap[modelName]
+	modelEnableGroupsLock.RUnlock()
+	return limit
 }
 
 func getPricingEndpointTypesForAbility(ability AbilityWithChannel, advancedCustomConfigs map[int]*dto.AdvancedCustomConfig) []constant.EndpointType {
@@ -341,6 +371,9 @@ func updatePricing() {
 			pricing.Description = meta.Description
 			pricing.Icon = meta.Icon
 			pricing.Tags = meta.Tags
+			pricing.ContextLength = meta.ContextLength
+			pricing.ContextWindow = meta.ContextWindow
+			pricing.MaxOutputTokens = meta.MaxOutputTokens
 			pricing.VendorID = meta.VendorID
 		}
 		modelPrice, findPrice := ratio_setting.GetModelPrice(model, false)
@@ -437,9 +470,15 @@ func updatePricing() {
 	modelEnableGroupsLock.Lock()
 	modelEnableGroups = make(map[string][]string)
 	modelQuotaTypeMap = make(map[string]int)
+	modelContextLengthMap = make(map[string]int)
+	modelContextWindowMap = make(map[string]int)
+	modelMaxOutputTokenMap = make(map[string]int)
 	for _, p := range pricingMap {
 		modelEnableGroups[p.ModelName] = p.EnableGroup
 		modelQuotaTypeMap[p.ModelName] = p.QuotaType
+		modelContextLengthMap[p.ModelName] = p.ContextLength
+		modelContextWindowMap[p.ModelName] = p.ContextWindow
+		modelMaxOutputTokenMap[p.ModelName] = p.MaxOutputTokens
 	}
 	modelEnableGroupsLock.Unlock()
 

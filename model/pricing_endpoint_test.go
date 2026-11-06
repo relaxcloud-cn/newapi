@@ -15,7 +15,7 @@ func resetPricingEndpointTestTables(t *testing.T) {
 	t.Helper()
 	originalMemoryCacheEnabled := common.MemoryCacheEnabled
 	common.MemoryCacheEnabled = true
-	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}))
+	require.NoError(t, DB.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}, &Option{}))
 	for _, table := range []string{"abilities", "channels", "models", "vendors"} {
 		require.NoError(t, DB.Exec("DELETE FROM "+table).Error)
 	}
@@ -105,6 +105,75 @@ func TestPricingAdvancedCustomUsesConfiguredEndpointTypes(t *testing.T) {
 	assert.Equal(t, []constant.EndpointType{
 		constant.EndpointTypeOpenAI,
 	}, byModel["gpt-4o"])
+}
+
+func TestUpsertModelContextMetadataFillsMissingAndPreservesConfigured(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+
+	require.NoError(t, DB.Create(&Model{ModelName: "ctx-probe-auto", Status: 1, NameRule: NameRuleExact}).Error)
+	require.NoError(t, DB.Create(&Model{ModelName: "ctx-probe-manual", Status: 1, NameRule: NameRuleExact, ContextLength: 123456, ContextWindow: 123456, MaxOutputTokens: 8192}).Error)
+
+	updated, err := UpsertModelContextMetadata(map[string]ModelContextMetadata{
+		"ctx-probe-auto":   {ContextLength: 393216, ContextWindow: 393216, MaxOutputTokens: 131072},
+		"ctx-probe-manual": {ContextLength: 999, ContextWindow: 999, MaxOutputTokens: 16},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, updated)
+
+	var auto Model
+	require.NoError(t, DB.Where("model_name = ?", "ctx-probe-auto").First(&auto).Error)
+	assert.Equal(t, 393216, auto.ContextLength)
+	assert.Equal(t, 393216, auto.ContextWindow)
+	assert.Equal(t, 131072, auto.MaxOutputTokens)
+
+	var manual Model
+	require.NoError(t, DB.Where("model_name = ?", "ctx-probe-manual").First(&manual).Error)
+	assert.Equal(t, 123456, manual.ContextLength)
+	assert.Equal(t, 123456, manual.ContextWindow)
+	assert.Equal(t, 8192, manual.MaxOutputTokens)
+}
+
+func TestParseContextProbeErrors(t *testing.T) {
+	contextLength, err := parseContextLimitFromError([]byte(`{"error":"maximum context length is 393216 tokens"}`), 400)
+	require.NoError(t, err)
+	assert.Equal(t, 393216, contextLength)
+
+	maxOutput, err := parseMaxOutputTokensFromError([]byte(`{"error":"max_output_tokens must be <= 131072"}`), 400)
+	require.NoError(t, err)
+	assert.Equal(t, 131072, maxOutput)
+
+	accepted, err := parseContextProbeResponse([]byte(`{"usage":{"prompt_tokens":200000}}`), 200)
+	require.NoError(t, err)
+	assert.Zero(t, accepted)
+}
+
+func TestPricingExposesModelContextMetadata(t *testing.T) {
+	resetPricingEndpointTestTables(t)
+
+	insertPricingEndpointChannel(t, 104, constant.ChannelTypeOpenAI, dto.ChannelOtherSettings{})
+	insertPricingEndpointAbility(t, 104, "ctx-probe-listed")
+	require.NoError(t, DB.Create(&Model{
+		ModelName:       "ctx-probe-listed",
+		ContextLength:   393216,
+		ContextWindow:   393216,
+		MaxOutputTokens: 131072,
+		Status:          1,
+		NameRule:        NameRuleExact,
+	}).Error)
+
+	byModel := make(map[string]Pricing)
+	for _, pricing := range GetPricing() {
+		byModel[pricing.ModelName] = pricing
+	}
+
+	pricing, ok := byModel["ctx-probe-listed"]
+	require.True(t, ok)
+	assert.Equal(t, 393216, pricing.ContextLength)
+	assert.Equal(t, 393216, pricing.ContextWindow)
+	assert.Equal(t, 131072, pricing.MaxOutputTokens)
+	assert.Equal(t, 393216, GetModelContextLength("ctx-probe-listed"))
+	assert.Equal(t, 393216, GetModelContextWindow("ctx-probe-listed"))
+	assert.Equal(t, 131072, GetModelMaxOutputTokens("ctx-probe-listed"))
 }
 
 func TestPricingModelMetadataEndpointsMergeWithAdvancedCustomInference(t *testing.T) {

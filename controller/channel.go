@@ -27,12 +27,15 @@ import (
 )
 
 type OpenAIModel struct {
-	ID         string         `json:"id"`
-	Object     string         `json:"object"`
-	Created    int64          `json:"created"`
-	OwnedBy    string         `json:"owned_by"`
-	Metadata   map[string]any `json:"metadata,omitempty"`
-	Permission []struct {
+	ID              string         `json:"id"`
+	Object          string         `json:"object"`
+	Created         int64          `json:"created"`
+	OwnedBy         string         `json:"owned_by"`
+	ContextLength   int            `json:"context_length"`
+	ContextWindow   int            `json:"context_window"`
+	MaxOutputTokens int            `json:"max_output_tokens"`
+	Metadata        map[string]any `json:"metadata,omitempty"`
+	Permission      []struct {
 		ID                 string `json:"id"`
 		Object             string `json:"object"`
 		Created            int64  `json:"created"`
@@ -336,11 +339,16 @@ func FetchUpstreamModels(c *gin.Context) {
 		common.ApiErrorT(c, "Failed to fetch models: {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
+	if _, err := fetchAndPersistChannelModelContextMetadata(channel, ids); err != nil {
+		common.SysLog(common.LogText("model context detection failed: %v", err))
+	}
+	contextMetadata := model.GetModelContextMetadataForModels(ids)
 
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    ids,
+		"success":          true,
+		"message":          "",
+		"data":             ids,
+		"context_metadata": contextMetadata,
 	})
 }
 
@@ -1467,10 +1475,17 @@ func FetchModels(c *gin.Context) {
 		common.ApiErrorT(c, "Failed to fetch models: {{error}}", map[string]any{"error": err.Error()})
 		return
 	}
+	// Direct /v1/models metadata is always persisted. Active probing is
+	// opt-in and uses the fetched model IDs, including unsaved previews.
+	if _, detectErr := fetchAndPersistChannelModelContextMetadata(channel, models); detectErr != nil {
+		common.SysLog(common.LogText("model context detection failed: %v", detectErr))
+	}
+	contextMetadata := model.GetModelContextMetadataForModels(models)
 	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    models,
+		"success":          true,
+		"message":          "",
+		"data":             models,
+		"context_metadata": contextMetadata,
 	})
 }
 

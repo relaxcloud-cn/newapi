@@ -265,22 +265,44 @@ func getUpstreamModelUpdateMinCheckIntervalSeconds() int64 {
 }
 
 func parseOpenAIModelIDs(body []byte) ([]string, error) {
+	ids, _, err := parseOpenAIModelMetadata(body)
+	return ids, err
+}
+
+func parseOpenAIModelMetadata(body []byte) ([]string, map[string]model.ModelContextMetadata, error) {
 	var result struct {
 		Data *[]OpenAIModel `json:"data"`
 	}
 	if err := common.Unmarshal(body, &result); err != nil {
-		return nil, fmt.Errorf("invalid OpenAI Models response: %w", err)
+		return nil, nil, fmt.Errorf("invalid OpenAI Models response: %w", err)
 	}
 	if result.Data == nil {
-		return nil, fmt.Errorf("invalid OpenAI Models response: data is required")
+		return nil, nil, fmt.Errorf("invalid OpenAI Models response: data is required")
 	}
-	ids := normalizeModelNames(lo.Map(*result.Data, func(item OpenAIModel, _ int) string {
-		return item.ID
-	}))
+	ids := normalizeModelNames(lo.Map(*result.Data, func(item OpenAIModel, _ int) string { return item.ID }))
 	if len(ids) == 0 {
-		return nil, fmt.Errorf("OpenAI Models response contains no valid model IDs")
+		return nil, nil, fmt.Errorf("OpenAI Models response contains no valid model IDs")
 	}
-	return ids, nil
+	contextMetadata := make(map[string]model.ModelContextMetadata)
+	for _, item := range *result.Data {
+		modelName := strings.TrimSpace(item.ID)
+		if modelName == "" {
+			continue
+		}
+		contextLength := item.ContextLength
+		contextWindow := item.ContextWindow
+		if contextWindow <= 0 {
+			contextWindow = contextLength
+		}
+		if contextLength > 0 || contextWindow > 0 || item.MaxOutputTokens > 0 {
+			contextMetadata[modelName] = model.ModelContextMetadata{
+				ContextLength:   contextLength,
+				ContextWindow:   contextWindow,
+				MaxOutputTokens: item.MaxOutputTokens,
+			}
+		}
+	}
+	return ids, contextMetadata, nil
 }
 
 func sanitizeFetchModelsError(err error, key string) error {
@@ -361,6 +383,34 @@ func getFetchModelsResponseBody(method string, requestURL string, channel *model
 		return nil, fmt.Errorf("status code: %d", response.StatusCode)
 	}
 	return io.ReadAll(response.Body)
+}
+
+func postContextProbeRequest(channel *model.Channel, payload []byte) ([]byte, int, error) {
+	baseURL := constant.GetChannelBaseURL(channel.Type)
+	if channel.GetBaseURL() != "" {
+		baseURL = channel.GetBaseURL()
+	}
+	url := baseURL + "/v1/chat/completions"
+	key, _, apiErr := channel.GetNextEnabledKey()
+	if apiErr != nil {
+		return nil, 0, fmt.Errorf("failed to get channel key: %w", apiErr)
+	}
+	key = strings.TrimSpace(key)
+	headers, err := buildFetchModelsHeaders(channel, key)
+	if err != nil {
+		return nil, 0, sanitizeFetchModelsError(err, key)
+	}
+	headers.Set("Content-Type", "application/json")
+	setting := channel.GetSetting()
+	client, err := service.GetHttpClientWithProxySettings(setting.Proxy, setting)
+	if err != nil {
+		return nil, 0, err
+	}
+	return model.PostJSONForContextProbe(url, channel, headers, payload, client)
+}
+
+func init() {
+	model.ContextProbePoster = postContextProbeRequest
 }
 
 func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
@@ -453,17 +503,41 @@ func fetchChannelUpstreamModelIDs(channel *model.Channel) ([]string, error) {
 		return nil, sanitizeAdvancedCustomRequestError(err, key, url)
 	}
 
-	var result OpenAIModelsResponse
-	if err := common.Unmarshal(body, &result); err != nil {
+	ids, contextMetadata, err := parseOpenAIModelMetadata(body)
+	if err != nil {
 		return nil, err
 	}
-	ids := lo.Map(result.Data, func(item OpenAIModel, _ int) string {
-		if channel.Type == constant.ChannelTypeGemini {
-			return strings.TrimPrefix(item.ID, "models/")
+	if len(contextMetadata) > 0 {
+		if _, err := model.UpsertModelContextMetadata(contextMetadata); err != nil {
+			common.SysLog(common.LogText("persist upstream context metadata failed: %v", err))
+		} else {
+			model.InvalidatePricingCache()
 		}
-		return item.ID
+	}
+	ids = lo.Map(ids, func(modelName string, _ int) string {
+		if channel.Type == constant.ChannelTypeGemini {
+			return strings.TrimPrefix(modelName, "models/")
+		}
+		return modelName
 	})
 	return normalizeModelNames(ids), nil
+}
+
+func fetchAndPersistChannelModelContextMetadata(channel *model.Channel, modelNames []string) (map[string]model.ModelContextMetadata, error) {
+	if !common.GetEnvOrDefaultBool("CONTEXT_LENGTH_PROBE_ENABLED", false) {
+		return model.GetModelContextMetadataForModels(modelNames), nil
+	}
+	metadata, err := model.DetectModelContextMetadata(channel, modelNames)
+	if err != nil {
+		return metadata, err
+	}
+	if len(metadata) > 0 {
+		if _, err := model.UpsertModelContextMetadata(metadata); err != nil {
+			return metadata, err
+		}
+		model.InvalidatePricingCache()
+	}
+	return metadata, nil
 }
 
 func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string) ([]string, error) {
@@ -498,7 +572,17 @@ func fetchAdvancedCustomUpstreamModelIDs(channel *model.Channel, baseURL string)
 	if err != nil {
 		return nil, sanitizeFetchModelsError(err, key)
 	}
-	return parseOpenAIModelIDs(body)
+	ids, contextMetadata, err := parseOpenAIModelMetadata(body)
+	if err != nil {
+		return nil, err
+	}
+	if len(contextMetadata) > 0 {
+		if _, err := model.UpsertModelContextMetadata(contextMetadata); err != nil {
+			return nil, err
+		}
+		model.InvalidatePricingCache()
+	}
+	return ids, nil
 }
 
 func updateChannelUpstreamModelSettings(channel *model.Channel, settings dto.ChannelOtherSettings, updateModels bool) error {

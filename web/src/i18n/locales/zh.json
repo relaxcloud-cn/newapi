@@ -7381,6 +7381,7 @@
     "© 2025 Your Company. All rights reserved.": "© 2025 您的公司。保留所有权利。",
     "、": "、",
     "，": "，",
-    "，and ": "，并"
+    "，and ": "，并",
+    "Context {{context_length}} / Output {{max_output_tokens}}": "上下文 {{context_length}} / 输出 {{max_output_tokens}}"
   }
 }
