@@ -176,6 +176,9 @@ func buildOpenAIModel(modelName string, ownerByModel map[string]string) dto.Open
 		oaiModel.OwnedBy = owner
 	}
 	oaiModel.SupportedEndpointTypes = model.GetModelSupportEndpointTypes(modelName)
+	oaiModel.ContextLength = model.GetModelContextLength(modelName)
+	oaiModel.ContextWindow = model.GetModelContextWindow(modelName)
+	oaiModel.MaxOutputTokens = model.GetModelMaxOutputTokens(modelName)
 	return oaiModel
 }
 
@@ -266,6 +269,8 @@ func ListModels(c *gin.Context, modelType int) {
 	if len(ownerGroups) > 0 {
 		ownerByModel = getPreferredModelOwners(userModelNames, ownerGroups)
 	}
+	// Refresh pricing caches once so endpoint and context metadata are current.
+	model.GetPricing()
 	userOpenAiModels := make([]dto.OpenAIModels, 0, len(userModelNames))
 	for _, modelName := range userModelNames {
 		userOpenAiModels = append(userOpenAiModels, buildOpenAIModel(modelName, ownerByModel))

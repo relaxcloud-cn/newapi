@@ -71,6 +71,151 @@ func TestParseOpenAIModelIDsStrictResponseContract(t *testing.T) {
 	}
 }
 
+func TestParseOpenAIModelMetadata(t *testing.T) {
+	ids, metadata, err := parseOpenAIModelMetadata([]byte(`{
+		"data": [{
+			"id": "systemone",
+			"context_length": 393216,
+			"context_window": 393216,
+			"max_output_tokens": 131072
+		}]
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"systemone"}, ids)
+	require.Equal(t, model.ModelContextMetadata{
+		ContextLength:   393216,
+		ContextWindow:   393216,
+		MaxOutputTokens: 131072,
+	}, metadata["systemone"])
+}
+
+func TestParseOpenAIModelMetadataMapsVLLMMaxModelLen(t *testing.T) {
+	ids, metadata, err := parseOpenAIModelMetadata([]byte(`{
+		"data": [
+			{"id": "DeepSeek-V4-Flash", "object": "model", "created": 1, "owned_by": "vllm", "max_model_len": 393216},
+			{"id": "explicit-wins", "context_length": 65536, "max_model_len": 393216}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"DeepSeek-V4-Flash", "explicit-wins"}, ids)
+	require.Equal(t, model.ModelContextMetadata{
+		ContextLength: 393216,
+		ContextWindow: 393216,
+	}, metadata["DeepSeek-V4-Flash"])
+	require.Equal(t, int64(65536), int64(metadata["explicit-wins"].ContextLength))
+}
+
+func TestParseOpenAIModelMetadataKeepsModelsWhenLimitsAreStrings(t *testing.T) {
+	ids, metadata, err := parseOpenAIModelMetadata([]byte(`{
+		"data": [
+			{"id": "string-limits", "context_length": "393216", "context_window": "393216", "max_output_tokens": "131072"},
+			{"id": "odd-limit", "context_length": "provider-default"}
+		]
+	}`))
+	require.NoError(t, err)
+	require.Equal(t, []string{"string-limits", "odd-limit"}, ids)
+	require.Equal(t, model.ModelContextMetadata{
+		ContextLength:   393216,
+		ContextWindow:   393216,
+		MaxOutputTokens: 131072,
+	}, metadata["string-limits"])
+	_, exists := metadata["odd-limit"]
+	require.False(t, exists)
+}
+
+func TestFetchUpstreamContextMetadataFlowsToListModels(t *testing.T) {
+	withSelfUseModeEnabled(t)
+	db := setupModelListControllerTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.Option{}))
+
+	require.NoError(t, db.Create(&model.User{
+		Id:       1005,
+		Username: "upstream-context-model-list-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     703,
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "upstream-context-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "upstream-context-channel",
+		Group:  "default",
+		Models: "deepseek-v4-flash",
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "deepseek-v4-flash",
+		ChannelId: 703,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, db.Create(&model.Model{
+		ModelName:       "deepseek-v4-flash",
+		ContextLength:   1_000_000,
+		ContextWindow:   1_000_000,
+		MaxOutputTokens: 1_000_000,
+		Status:          1,
+		NameRule:        model.NameRuleExact,
+	}).Error)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [{
+				"id": "deepseek-v4-flash",
+				"max_model_len": 393216,
+				"max_output_tokens": 131072
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	baseURL := server.URL
+	channel := &model.Channel{
+		Id:      703,
+		Type:    constant.ChannelTypeOpenAI,
+		Key:     "upstream-context-key",
+		BaseURL: &baseURL,
+	}
+	ids, err := fetchChannelUpstreamModelIDs(channel)
+	require.NoError(t, err)
+	require.Equal(t, []string{"deepseek-v4-flash"}, ids)
+
+	var stored model.Model
+	require.NoError(t, db.Where("model_name = ?", "deepseek-v4-flash").First(&stored).Error)
+	require.Equal(t, 393216, stored.ContextLength)
+	require.Equal(t, 393216, stored.ContextWindow)
+	require.Equal(t, 131072, stored.MaxOutputTokens)
+
+	model.InitChannelCache()
+	model.InvalidatePricingCache()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1005)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	payload := decodeListModelsPayload(t, recorder)
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, "deepseek-v4-flash", payload.Data[0].Id)
+	require.Equal(t, 393216, payload.Data[0].ContextLength)
+	require.Equal(t, 393216, payload.Data[0].ContextWindow)
+	require.Equal(t, 131072, payload.Data[0].MaxOutputTokens)
+}
+
+func TestExpandChannelModelContextMetadataFollowsAliases(t *testing.T) {
+	mapping := `{"cybersec-1.0":"DeepSeek-V4-Flash","deepseek-alias":"cybersec-1.0"}`
+	channel := &model.Channel{ModelMapping: &mapping}
+	expanded := expandChannelModelContextMetadata(channel, map[string]model.ModelContextMetadata{
+		"DeepSeek-V4-Flash": {ContextLength: 393216, ContextWindow: 393216},
+	})
+	require.Equal(t, 393216, expanded["cybersec-1.0"].ContextLength)
+	require.Equal(t, 393216, expanded["deepseek-alias"].ContextWindow)
+}
+
 func TestFetchAdvancedCustomModelsAppliesHeaderOverrideAfterRouteAuth(t *testing.T) {
 	type receivedRequest struct {
 		Headers http.Header
