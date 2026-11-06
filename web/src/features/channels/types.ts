@@ -218,6 +218,22 @@ export interface FetchModelsResponse {
   success: boolean
   message?: string
   data?: string[]
+  context_metadata?: Record<
+    string,
+    {
+      context_length?: number
+      context_window?: number
+      max_output_tokens?: number
+    }
+  >
+}
+
+export interface UpstreamModelContextMetadata {
+  [model: string]: {
+    context_length?: number
+    context_window?: number
+    max_output_tokens?: number
+  }
 }
 
 export interface CopyChannelResponse {
