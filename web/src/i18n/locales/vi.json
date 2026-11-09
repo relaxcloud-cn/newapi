@@ -7381,6 +7381,8 @@
     "© 2025 Your Company. All rights reserved.": "© 2025 Công ty của bạn. Mọi quyền được bảo lưu.",
     "、": ", ",
     "，": ", ",
-    "，and ": " và "
+    "，and ": " và ",
+    "Context window": "Cửa sổ ngữ cảnh",
+    "Context {{context_length}} / Output {{max_output_tokens}}": "Ngữ cảnh {{context_length}} / Đầu ra {{max_output_tokens}}"
   }
 }

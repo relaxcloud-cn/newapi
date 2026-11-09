@@ -392,6 +392,59 @@ func TestListModelsUsesAdvancedCustomEndpointTypesFromPricingCache(t *testing.T)
 	}, payload.Data[0].SupportedEndpointTypes)
 }
 
+func TestListModelsExposesContextMetadata(t *testing.T) {
+	withSelfUseModeEnabled(t)
+	db := setupModelListControllerTestDB(t)
+
+	require.NoError(t, db.Create(&model.User{
+		Id:       1004,
+		Username: "context-metadata-model-list-user",
+		Password: "password",
+		Group:    "default",
+		Status:   common.UserStatusEnabled,
+	}).Error)
+	require.NoError(t, db.Create(&model.Channel{
+		Id:     702,
+		Type:   constant.ChannelTypeOpenAI,
+		Key:    "context-metadata-key",
+		Status: common.ChannelStatusEnabled,
+		Name:   "context-metadata-channel",
+		Group:  "default",
+		Models: "gpt-4o",
+	}).Error)
+	require.NoError(t, db.Create(&model.Ability{
+		Group:     "default",
+		Model:     "gpt-4o",
+		ChannelId: 702,
+		Enabled:   true,
+	}).Error)
+	require.NoError(t, db.Create(&model.Model{
+		ModelName:       "gpt-4o",
+		ContextLength:   393216,
+		ContextWindow:   393216,
+		MaxOutputTokens: 131072,
+		Status:          1,
+		NameRule:        model.NameRuleExact,
+	}).Error)
+
+	model.InitChannelCache()
+	model.InvalidatePricingCache()
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	ctx.Set("id", 1004)
+
+	ListModels(ctx, constant.ChannelTypeOpenAI)
+
+	payload := decodeListModelsPayload(t, recorder)
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, "gpt-4o", payload.Data[0].Id)
+	require.Equal(t, 393216, payload.Data[0].ContextLength)
+	require.Equal(t, 393216, payload.Data[0].ContextWindow)
+	require.Equal(t, 131072, payload.Data[0].MaxOutputTokens)
+}
+
 func TestListModelsTokenLimitIncludesTieredBillingModel(t *testing.T) {
 	withSelfUseModeDisabled(t)
 	withTieredBillingConfig(t, map[string]string{

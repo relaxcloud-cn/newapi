@@ -252,6 +252,29 @@ test('models published under another name show that name as a badge next to the 
   expect(screen.queryByLabelText(/Published as o3/)).not.toBeInTheDocument()
 })
 
+test('existing models show every discovered context limit', () => {
+  render(
+    <UpstreamModelSelection
+      models={['gpt-one']}
+      selected={['gpt-one']}
+      existingModels={['gpt-one']}
+      showChanges
+      onChange={() => undefined}
+      contextMetadata={{
+        'gpt-one': {
+          context_length: 393216,
+          context_window: 393216,
+          max_output_tokens: 131072,
+        },
+      }}
+    />
+  )
+
+  expect(screen.getByText(/Context: 393,216/)).toBeVisible()
+  expect(screen.getByText(/Context window: 393,216/)).toBeVisible()
+  expect(screen.getByText(/Max output: 131,072/)).toBeVisible()
+})
+
 test('long model names remain fully labeled and selectable in a container-responsive list', async () => {
   const user = userEvent.setup()
   const model = 'gpt-4.1-mini-deployment-with-a-long-region-name-2025-04-14'
